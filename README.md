@@ -114,4 +114,4 @@ These endpoints never load model weights, perform live inference, call an LLM, r
 pytest -q --basetemp pytest-tmp-current
 ```
 
-Further reading: [v2 architecture](docs/architecture-v2.md), [data and evidence](docs/data-and-evidence.md), [Phase 15 architecture](docs/phase15-multimodal.md), and [validation and shadow](docs/validation-and-shadow.md).
+Further reading: [v2 architecture](docs/architecture-v2.md), [architecture blueprint](docs/architecture-blueprint.md), [data and evidence](docs/data-and-evidence.md), [Phase 15 architecture](docs/phase15-multimodal.md), [20-hour sprint plan](docs/SPRINT-20H.md), [Phase 15 Gherkin contract](specs/phase15_multimodal.feature), and [validation and shadow](docs/validation-and-shadow.md).

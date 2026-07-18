@@ -2,6 +2,9 @@
 
 This is the visible clock and cut line for the current build. The deadline is **2026-07-19 00:06 America/Los_Angeles (PDT, UTC-07:00)**. The planning reference start is **2026-07-18 04:06 PDT**.
 
+- Sprint tracker: [GitHub Issue #1](https://github.com/gizmolotry/marketwatch/issues/1)
+- Working branch: `codex/20h-market-integrity-demo`
+
 To see the live remaining time in VS Code, run **Terminal → Run Task → Sprint: countdown**. The deadline is fixed; if work starts later, do not slide it. Recalculate remaining time and cut scope.
 
 ## Definition of a successful submission
