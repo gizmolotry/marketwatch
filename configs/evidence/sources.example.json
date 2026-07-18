@@ -1,0 +1,19 @@
+{
+  "description": "Copy this file and explicitly declare each monitored public source. MarketLeak ships no default feed because undeclared coverage would make negative information claims misleading.",
+  "sources": [],
+  "source_template": {
+    "source_id": "publisher-stable-id",
+    "url": "https://publisher.example.org/explicit-feed-or-document-url",
+    "format": "rss",
+    "publisher": "Publisher name",
+    "enabled": true,
+    "backfill": false,
+    "timeout_seconds": 10,
+    "max_pages": 1,
+    "max_entries": 100,
+    "max_response_bytes": 2000000,
+    "headers": {
+      "User-Agent": "MarketLeak-Evidence/1.0"
+    }
+  }
+}

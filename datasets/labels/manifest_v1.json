@@ -1,0 +1,37 @@
+{
+  "manifest_version": "1",
+  "created_at": "2026-07-12T00:00:00Z",
+  "public_adjudications": {
+    "registry": "public_cases_v1.jsonl",
+    "source": "https://www.cftc.gov/PressRoom/PressReleases/9185-26",
+    "case_count": 2,
+    "nature": "real public venue enforcement cases described by an official regulator",
+    "training_eligible": false,
+    "reason": "the advisory omits exact market tickers, account identifiers, and transaction timestamps"
+  },
+  "synthetic_mechanics": {
+    "types": [
+      "scheduled_news",
+      "live_sports",
+      "sibling_repricing",
+      "low_liquidity_print",
+      "stale_catch_up",
+      "resolution",
+      "outage_recovery",
+      "market_maker_rebalance"
+    ],
+    "nature": "generated false-positive mechanisms for pipeline and detector tests",
+    "training_eligible": false,
+    "not_adjudications": true
+  },
+  "label_policy": {
+    "targets_are_separate": ["A_activity", "B_public_explanation", "C_actor_evidence"],
+    "unknown_is_negative": false,
+    "unmapped_is_negative": false
+  },
+  "limitations": [
+    "No public case is mapped to a canonical market or actor identifier.",
+    "The registry is not sufficient to estimate model effectiveness.",
+    "Synthetic mechanics validate behavior only and are excluded from training and effectiveness claims."
+  ]
+}

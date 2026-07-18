@@ -1,0 +1,41 @@
+{
+  "registry_uid": "registry:polymarket-btc65k-live",
+  "schema_version": "phase15-source-registry-v1",
+  "targets": [
+    {
+      "target_uid": "market:polymarket-btc65k-july",
+      "venue": "polymarket",
+      "market_uid": "polymarket:0xc9c9790c8f26dd9c8cabae9dd76be37aa86a6ded7de660e1da9d19324cf618d4",
+      "polymarket_asset_ids": [
+        "37863990088639017224129863896084706036599112986230542056774425461928248691792",
+        "10222646434785930729270432914646282814690567121763865370487081241993787794954"
+      ],
+      "metadata_ref": "metadata:polymarket-btc65k-july",
+      "case_context_config_ref": "config:polymarket-btc65k-case-context-v1",
+      "reference_mapping_uid": "reference:polymarket-btc65k-binance-btcusdt-high",
+      "stream_config_ref": "stream:polymarket-btc65k-july",
+      "stream_settings": {
+        "max_messages": 500,
+        "duration_seconds": 120,
+        "max_reconnects": 2
+      }
+    }
+  ],
+  "documented_btc_reference_mappings": [
+    {
+      "mapping_uid": "reference:polymarket-btc65k-binance-btcusdt-high",
+      "target_uid": "market:polymarket-btc65k-july",
+      "market_rule_source_uid": "polymarket:source/gamma-market",
+      "market_rule_source_url": "https://gamma-api.polymarket.com/markets/2758340",
+      "settlement_source_uid": "binance:source/btcusdt-1m-high",
+      "settlement_source_url": "https://www.binance.com/en/trade/BTC_USDT",
+      "primary_source_uid": "source:binance-spot-btcusdt-kline",
+      "primary_source_url": "https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams",
+      "instrument": "BTC-USDT",
+      "observation_kind": "candle_high",
+      "candle_interval": "1m",
+      "requires_closed_candle": true,
+      "configured_endpoint_ref": "config:binance-spot-btcusdt-kline-1m-v1"
+    }
+  ]
+}

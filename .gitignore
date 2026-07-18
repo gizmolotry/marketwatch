@@ -1,0 +1,106 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+
+# Python and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+pytest-tmp*/
+tmp/
+
+# Local environments
+.venv/
+venv/
+
+# JavaScript caches and builds
+.npm-cache/
+node_modules/
+dist/
+ui/.npm-cache/
+ui/node_modules/
+ui/dist/
+
+# Generated v2 collections and runs. Keep the run-directory placeholder.
+data/*
+!data/runs/
+data/runs/*
+!data/runs/.gitkeep
+
+# Preserve versioned label manifests and public-source registry.
+datasets/*
+!datasets/labels/
+datasets/labels/*
+!datasets/labels/manifest_v1.json
+!datasets/labels/public_cases_v1.jsonl
+
+# Generated legacy evidence and derived artifacts; retain fixture parquet files.
+demo_data/raw_evidence/
+demo_data/onchain_ticks/
+demo_data/cache_*
+demo_data/*.pkl
+demo_data/market_dump.csv
+
+# Generated reports and application output
+output/
+reports/
+
+# Local test, browser, notebook, and coverage output
+.pytest-*/
+.test-tmp*/
+.playwright-cli/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+
+# Local databases, logs, and trained-model artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.pkl
+*.pickle
+*.joblib
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.faiss
+/artifacts/
+/models/
+
+# Additional credential containers
+*.p12
+*.pfx
+secrets*.json
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+
+# Internal prompts and obsolete one-off development scripts
+/codex_goal_prompt.txt
+/codex_prompt*.txt
+/codex_scale_fixes.txt
+/codex_styling.md
+/prompt.txt
+/generate_test_data.py
+/ingest_graph.py
+/restore.py
+/scratch.py
+/test_graph.py
+/test_leakrisk.py
+/test_rag.py
+/test_sanity.py

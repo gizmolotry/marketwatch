@@ -1,0 +1,19 @@
+schema_version: "2.0.0"
+detector: causal_activity_v2
+bucket_minutes: 5
+max_carry_age_minutes: 10
+baseline_days: 7
+min_baseline_observations: 288
+min_baseline_elapsed_hours: 24
+empirical_tail_min_observations: 100
+fdr_alpha: 0.05
+incident_cooldown_minutes: 30
+controls:
+  scheduled_window_minutes: 60
+  near_close_window_minutes: 60
+  thin_liquidity_threshold: 100.0
+  sibling_control_ratio: 0.25
+claims:
+  target: abnormal_activity_only
+  score_is_probability: false
+  fraud_finding: false

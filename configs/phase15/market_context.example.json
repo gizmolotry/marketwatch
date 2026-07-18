@@ -1,0 +1,59 @@
+{
+  "description": "Example-only Phase 15 market context. Copy and replace every example UID and URL with a captured venue/primary-source artifact before use. This file does not assert that any real market uses the illustrated schedule or source.",
+  "contexts": [
+    {
+      "context_uid": "example:market-context-001",
+      "market_uid": "example:market-001",
+      "question": "Will the documented example event occur by the stated deadline?",
+      "category": "example-calendar-market",
+      "outcomes": [
+        {"outcome_uid": "example:market-001-yes", "label": "Yes"},
+        {"outcome_uid": "example:market-001-no", "label": "No"}
+      ],
+      "sibling_markets": [
+        {
+          "market_uid": "example:market-002",
+          "relation": "same_event",
+          "rationale": "The captured venue metadata identifies this market as a related contract."
+        }
+      ],
+      "scheduled_events": [
+        {
+          "scheduled_event_uid": "example:calendar-event-001",
+          "title": "Illustrative scheduled release",
+          "state": "scheduled",
+          "scheduled_for": "2026-07-14T16:00:00Z",
+          "announced_at": "2026-07-13T12:00:00Z",
+          "source_url": "https://venue.example/official-calendar"
+        }
+      ],
+      "resolution_schedule": {
+        "scheduled_open_at": "2026-07-13T00:00:00Z",
+        "scheduled_close_at": "2026-07-14T18:00:00Z",
+        "expected_resolution_at": "2026-07-14T19:00:00Z",
+        "settlement_deadline_at": "2026-07-15T19:00:00Z",
+        "resolution_rule_url": "https://venue.example/market-rules/example-market-001"
+      },
+      "event_time": "2026-07-13T12:00:00Z",
+      "first_seen_at": "2026-07-13T12:01:00Z",
+      "retrieved_at": "2026-07-13T12:02:00Z",
+      "ingested_at": "2026-07-13T12:03:00Z",
+      "provenance": {
+        "source_uid": "example:venue-market-metadata",
+        "raw_artifact_uid": "example:raw-market-context-001",
+        "parser_version": "phase15-context-example-v1",
+        "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "retrieved_at": "2026-07-13T12:02:00Z",
+        "source_url": "https://venue.example/markets/example-market-001"
+      },
+      "reliability": {
+        "source_uid": "example:venue-market-metadata",
+        "source_class": "official_venue",
+        "tier": "high",
+        "score": "0.95",
+        "assessed_at": "2026-07-13T12:02:00Z",
+        "rationale": "Example captured official venue market metadata."
+      }
+    }
+  ]
+}

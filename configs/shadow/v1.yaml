@@ -1,0 +1,23 @@
+schema_version: "1.0.0"
+protocol: prospective_shadow
+# Operational entry point: `shadow-prospective` with canonical normalized partitions.
+# The prepared-input shadow-* commands are engineering-test harnesses only.
+engineering_validation_only: true
+effectiveness_unknown: true
+tuning_locked: true
+control_sampling:
+  strategy: fixed_seed_low_risk_control
+  rate: 0.05
+  random_seed: 20260712
+ledger:
+  format: canonical_jsonl
+  hash: sha256
+  hash_chained: true
+  append_only: true
+  atomic_write: true
+coverage:
+  require_explicit_source_status: true
+  incomplete_status_visible: true
+claims:
+  allow_effectiveness_claim: false
+  label: engineering_validation_only

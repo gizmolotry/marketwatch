@@ -1,0 +1,732 @@
+/* Phase 15 readiness is intentionally a status surface, never a scorecard. */
+
+.readiness-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.readiness-grid .page-header,
+.readiness-grid .readiness-callout,
+.readiness-grid .readiness-banner,
+.readiness-grid .readiness-summary-grid {
+  grid-column: 1 / -1;
+}
+
+.readiness-header {
+  background:
+    linear-gradient(122deg, rgba(85, 221, 255, 0.16), transparent 37%),
+    linear-gradient(298deg, rgba(205, 166, 255, 0.15), transparent 42%),
+    rgba(5, 13, 19, 0.78);
+}
+
+.readiness-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px;
+  border: 1px solid rgba(159, 185, 189, 0.3);
+  border-radius: 8px;
+  background: rgba(159, 185, 189, 0.06);
+}
+
+.readiness-callout.ready {
+  border-color: rgba(53, 247, 178, 0.42);
+  background: rgba(53, 247, 178, 0.08);
+}
+
+.readiness-callout.blocked {
+  border-color: rgba(255, 209, 102, 0.46);
+  background: rgba(255, 209, 102, 0.08);
+}
+
+.readiness-callout p,
+.readiness-boundary-panel p {
+  max-width: 760px;
+  margin-bottom: 0;
+  color: #b9ced1;
+}
+
+.readiness-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 1px solid rgba(255, 209, 102, 0.42);
+  border-radius: 8px;
+  color: #d9edef;
+  background: rgba(255, 209, 102, 0.08);
+}
+
+.readiness-banner strong {
+  color: #ffd166;
+}
+
+.readiness-banner span {
+  color: #b9ced1;
+}
+
+.readiness-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.readiness-summary-card {
+  display: grid;
+  min-height: 156px;
+  align-content: space-between;
+  gap: 12px;
+  padding: 18px;
+}
+
+.readiness-summary-card strong {
+  color: #d8fbff;
+  font-size: 1.65rem;
+  text-transform: capitalize;
+}
+
+.readiness-summary-card small,
+.readiness-row small {
+  color: #9fb9bd;
+}
+
+.readiness-panel,
+.readiness-boundary-panel {
+  padding: 20px;
+}
+
+.readiness-stack {
+  display: grid;
+}
+
+.readiness-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  align-items: center;
+  gap: 18px;
+  padding: 15px 0;
+  border-top: 1px solid rgba(166, 255, 231, 0.1);
+}
+
+.readiness-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.readiness-row:last-child {
+  padding-bottom: 0;
+}
+
+.readiness-row strong {
+  display: block;
+  margin-top: 3px;
+  color: #eafdf8;
+  font-size: 1rem;
+  text-transform: capitalize;
+}
+
+.readiness-row > div:last-child {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+}
+
+.status-pill.readiness-ready {
+  color: #8effd8;
+  border-color: rgba(53, 247, 178, 0.4);
+  background: rgba(53, 247, 178, 0.08);
+}
+
+.status-pill.readiness-blocked {
+  color: #ffd166;
+  border-color: rgba(255, 209, 102, 0.45);
+  background: rgba(255, 209, 102, 0.1);
+}
+
+.status-pill.readiness-unknown {
+  color: #d9edef;
+  border-color: rgba(159, 185, 189, 0.3);
+  background: rgba(159, 185, 189, 0.08);
+}
+
+.readiness-boundary-panel {
+  grid-column: 1 / -1;
+  border-left: 3px solid #55ddff;
+}
+
+@media (max-width: 1040px) {
+  .readiness-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .readiness-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .readiness-callout,
+  .readiness-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .readiness-row {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+}
+
+/* Bitcoin Context is a read-only provenance surface, never a wallet profiler. */
+
+.bitcoin-context-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.bitcoin-context-grid .page-header,
+.bitcoin-context-grid .bitcoin-context-callout,
+.bitcoin-context-grid .bitcoin-context-banner,
+.bitcoin-context-grid .bitcoin-facts-panel {
+  grid-column: 1 / -1;
+}
+
+.bitcoin-context-header {
+  background:
+    linear-gradient(124deg, rgba(255, 179, 71, 0.13), transparent 38%),
+    linear-gradient(302deg, rgba(85, 221, 255, 0.1), transparent 44%),
+    rgba(5, 13, 19, 0.78);
+}
+
+.bitcoin-context-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px;
+  border: 1px solid rgba(159, 185, 189, 0.3);
+  border-radius: 8px;
+  background: rgba(159, 185, 189, 0.06);
+}
+
+.bitcoin-context-callout.context-observed {
+  border-color: rgba(85, 221, 255, 0.4);
+  background: rgba(85, 221, 255, 0.07);
+}
+
+.bitcoin-context-callout.context-blocked {
+  border-color: rgba(255, 209, 102, 0.44);
+  background: rgba(255, 209, 102, 0.08);
+}
+
+.bitcoin-context-callout p,
+.bitcoin-context-banner span {
+  max-width: 760px;
+  margin-bottom: 0;
+  color: #b9ced1;
+}
+
+.bitcoin-context-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 1px solid rgba(255, 209, 102, 0.42);
+  border-radius: 8px;
+  color: #d9edef;
+  background: rgba(255, 209, 102, 0.08);
+}
+
+.bitcoin-context-banner strong {
+  color: #ffd166;
+}
+
+.bitcoin-context-panel {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 20px;
+}
+
+.bitcoin-link-panel {
+  border-left: 3px solid #ffb347;
+}
+
+.bitcoin-detail-list {
+  display: grid;
+  margin: 0;
+}
+
+.bitcoin-detail-list > div {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.45fr) minmax(0, 1fr);
+  gap: 14px;
+  padding: 11px 0;
+  border-top: 1px solid rgba(166, 255, 231, 0.1);
+}
+
+.bitcoin-detail-list > div:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.bitcoin-detail-list dt {
+  color: #8eaeb3;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bitcoin-detail-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #e4f6f7;
+}
+
+.bitcoin-timestamp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bitcoin-timestamp {
+  display: grid;
+  gap: 4px;
+  padding: 11px;
+  border: 1px solid rgba(159, 185, 189, 0.18);
+  border-radius: 6px;
+  background: rgba(2, 10, 15, 0.34);
+}
+
+.bitcoin-timestamp span,
+.bitcoin-fact-meta small {
+  color: #8eaeb3;
+  font-size: 0.76rem;
+}
+
+.bitcoin-timestamp strong {
+  overflow-wrap: anywhere;
+  color: #d9edef;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.bitcoin-source-link {
+  width: fit-content;
+  color: #7ee6ff;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.bitcoin-source-link:hover,
+.bitcoin-source-link:focus-visible {
+  color: #c6f7ff;
+  text-decoration: underline;
+}
+
+.bitcoin-fact-stack {
+  display: grid;
+}
+
+.bitcoin-fact-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.8fr);
+  gap: 18px;
+  padding: 14px 0;
+  border-top: 1px solid rgba(166, 255, 231, 0.1);
+}
+
+.bitcoin-fact-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.bitcoin-fact-row strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: #eafdf8;
+}
+
+.bitcoin-fact-meta {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  overflow-wrap: anywhere;
+  color: #b9ced1;
+  font-size: 0.84rem;
+}
+
+.status-pill.context-observed {
+  color: #8eeeff;
+  border-color: rgba(85, 221, 255, 0.42);
+  background: rgba(85, 221, 255, 0.08);
+}
+
+.status-pill.context-blocked {
+  color: #ffd166;
+  border-color: rgba(255, 209, 102, 0.45);
+  background: rgba(255, 209, 102, 0.1);
+}
+
+.status-pill.context-unknown {
+  color: #d9edef;
+  border-color: rgba(159, 185, 189, 0.3);
+  background: rgba(159, 185, 189, 0.08);
+}
+
+@media (max-width: 1040px) {
+  .bitcoin-context-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .bitcoin-context-callout,
+  .bitcoin-context-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .bitcoin-detail-list > div,
+  .bitcoin-fact-row {
+    grid-template-columns: 1fr;
+  }
+
+  .bitcoin-timestamp-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* V3 evidence review */
+.evidence-review-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.evidence-review-grid .page-header,
+.evidence-review-grid .evidence-review-callout,
+.evidence-review-grid .review-boundary-panel,
+.evidence-review-grid .review-case-funnel,
+.evidence-review-grid .review-empty-panel {
+  grid-column: 1 / -1;
+}
+
+.evidence-review-header {
+  max-width: 820px;
+}
+
+.evidence-review-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 21px 23px;
+  border: 1px solid rgba(126, 230, 255, 0.3);
+  border-radius: 9px;
+  background: linear-gradient(120deg, rgba(26, 105, 125, 0.19), rgba(5, 19, 29, 0.56));
+}
+
+.evidence-review-callout h3,
+.review-case-heading h3,
+.review-empty-panel h3 {
+  margin: 3px 0 7px;
+  color: #edfffb;
+}
+
+.evidence-review-callout p,
+.review-empty-panel p {
+  margin: 0;
+  color: #b9ced1;
+}
+
+.review-boundary-panel {
+  padding: 20px 23px;
+}
+
+.review-boundary-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.review-boundary-list > div,
+.review-decision-grid > div {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid rgba(159, 185, 189, 0.18);
+  border-radius: 7px;
+  background: rgba(2, 10, 15, 0.34);
+}
+
+.review-boundary-list dt,
+.review-boundary-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-boundary-list dt {
+  color: #8eaeb3;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.73rem;
+}
+
+.review-boundary-list dd {
+  color: #e9fbf8;
+  font-weight: 650;
+}
+
+.review-case-funnel {
+  display: grid;
+  gap: 16px;
+}
+
+.review-case-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.32fr) minmax(190px, 0.46fr);
+  align-items: end;
+  gap: 16px;
+  padding: 0 2px;
+}
+
+.review-case-heading .eyebrow {
+  margin-bottom: 4px;
+}
+
+.review-case-meta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.review-case-meta span,
+.review-decision-grid small {
+  color: #8eaeb3;
+  font-size: 0.76rem;
+}
+
+.review-case-meta strong,
+.review-decision-grid strong {
+  overflow-wrap: anywhere;
+  color: #dff6f2;
+  font-size: 0.88rem;
+}
+
+.review-stage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.review-stage-card {
+  min-width: 0;
+  padding: 20px;
+}
+
+.review-stage-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.review-stage-heading .eyebrow {
+  margin: 0 0 3px;
+}
+
+.review-stage-heading h3 {
+  margin: 0;
+  color: #eafff9;
+  font-size: 1rem;
+}
+
+.review-stage-index {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid rgba(126, 230, 255, 0.37);
+  border-radius: 50%;
+  color: #8eeeff;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.76rem;
+}
+
+.review-detail-list {
+  display: grid;
+  margin: 0;
+}
+
+.review-detail-list > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.42fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(166, 255, 231, 0.1);
+}
+
+.review-detail-list > div:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.review-detail-list dt,
+.review-check-row span,
+.review-ledger-row .metric-label,
+.review-decision-grid .metric-label {
+  color: #8eaeb3;
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.review-detail-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #e3f7f7;
+}
+
+.review-check-list,
+.review-ledger-list {
+  display: grid;
+}
+
+.review-check-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(110px, 0.45fr);
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-top: 1px solid rgba(166, 255, 231, 0.1);
+}
+
+.review-check-row:first-child,
+.review-ledger-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.review-check-row strong,
+.review-ledger-row strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: #e6faf6;
+  font-size: 0.86rem;
+}
+
+.review-check-row > span:last-child {
+  overflow-wrap: anywhere;
+  color: #b9ced1;
+  font-size: 0.79rem;
+  text-align: right;
+}
+
+.review-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.review-ledger-panel {
+  grid-column: 1 / -1;
+}
+
+.review-ledger-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 0.8fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(166, 255, 231, 0.1);
+}
+
+.status-pill.review-observed {
+  color: #8eeeff;
+  border-color: rgba(85, 221, 255, 0.42);
+  background: rgba(85, 221, 255, 0.08);
+}
+
+.status-pill.review-restrained {
+  color: #ffd166;
+  border-color: rgba(255, 209, 102, 0.45);
+  background: rgba(255, 209, 102, 0.1);
+}
+
+.status-pill.review-unavailable {
+  color: #d9edef;
+  border-color: rgba(159, 185, 189, 0.3);
+  background: rgba(159, 185, 189, 0.08);
+}
+
+.review-empty-panel {
+  display: grid;
+  gap: 13px;
+  padding: 25px;
+}
+
+.review-empty-stages {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.review-empty-stages span {
+  padding: 11px;
+  border: 1px solid rgba(159, 185, 189, 0.18);
+  border-radius: 6px;
+  color: #b9ced1;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 1040px) {
+  .evidence-review-grid,
+  .review-stage-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-case-heading {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .review-case-heading > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .review-ledger-panel {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .evidence-review-callout,
+  .review-stage-heading {
+    align-items: flex-start;
+  }
+
+  .evidence-review-callout {
+    flex-direction: column;
+  }
+
+  .review-boundary-list,
+  .review-case-heading,
+  .review-decision-grid,
+  .review-empty-stages {
+    grid-template-columns: 1fr;
+  }
+
+  .review-case-heading > :first-child {
+    grid-column: auto;
+  }
+
+  .review-detail-list > div,
+  .review-check-row,
+  .review-ledger-row {
+    grid-template-columns: 1fr;
+  }
+
+  .review-check-row > span:last-child {
+    text-align: left;
+  }
+}

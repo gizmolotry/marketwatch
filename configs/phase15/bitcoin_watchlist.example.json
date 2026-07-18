@@ -1,0 +1,35 @@
+{
+  "description": "Example-only, read-only Bitcoin context configuration. It contains no real individual or real monitored address. Replace every placeholder only after independent review and a captured documented external link. This configuration never establishes ownership, access, intent, misconduct, or a connection to a prediction-market participant.",
+  "collection_scope": {
+    "network": "bitcoin_mainnet",
+    "purpose": "context_only",
+    "allowed_public_fact_types": [
+      "block_timestamp",
+      "transaction_confirmation",
+      "public_address_activity"
+    ],
+    "ownership_inference": false,
+    "intent_inference": false,
+    "fraud_or_risk_scoring": false,
+    "automatic_market_linking": false,
+    "polymarket_settlement_corroboration": false
+  },
+  "watchlist": [
+    {
+      "address_uid": "bitcoin:address-placeholder-001",
+      "address": "bc1qexampleplaceholdernotarealaddress000000000000000000000",
+      "placeholder_only": true,
+      "collection_scope": "context_only",
+      "link_provenance_required": true,
+      "documented_external_link": {
+        "status": "required_before_context_admission",
+        "link_uid": "example:bitcoin-market-link-001",
+        "source_uid": "example:documented-external-source",
+        "raw_artifact_uid": "example:raw-documented-external-link-001",
+        "content_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "first_seen_at": "2026-07-13T12:00:00Z",
+        "source_url": "https://example.test/replace-with-a-captured-public-link"
+      }
+    }
+  ]
+}

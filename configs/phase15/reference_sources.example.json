@@ -1,0 +1,66 @@
+{
+  "description": "Example-only documented settlement/reference source mapping. A production market without a captured documented mapping must remain missing_documented_settlement_source; do not substitute a generic BTC/USD or other exchange price.",
+  "documented_sources": [
+    {
+      "mapping_uid": "example:reference-mapping-001",
+      "market_uid": "example:market-001",
+      "market_rule_source_uid": "example:venue-market-rules",
+      "settlement_source_uid": "example:documented-settlement-benchmark",
+      "primary_source_uid": "example:documented-primary-price-feed",
+      "asset_symbol": "BTC",
+      "quote_currency": "USD",
+      "observation_kind": "ticker_last",
+      "candle_interval": null,
+      "requires_closed_candle": false,
+      "settlement_rule_url": "https://venue.example/market-rules/example-market-001",
+      "primary_source_url": "https://benchmark.example/documented-primary-feed",
+      "event_time": "2026-07-13T12:00:00Z",
+      "first_seen_at": "2026-07-13T12:01:00Z",
+      "retrieved_at": "2026-07-13T12:02:00Z",
+      "ingested_at": "2026-07-13T12:03:00Z",
+      "provenance": {
+        "source_uid": "example:venue-market-rules",
+        "raw_artifact_uid": "example:raw-reference-mapping-001",
+        "parser_version": "phase15-reference-mapping-example-v1",
+        "content_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "retrieved_at": "2026-07-13T12:02:00Z",
+        "source_url": "https://venue.example/market-rules/example-market-001"
+      },
+      "reliability": {
+        "source_uid": "example:venue-market-rules",
+        "source_class": "official_venue",
+        "tier": "high",
+        "score": "0.95",
+        "assessed_at": "2026-07-13T12:02:00Z",
+        "rationale": "Example captured venue rule that names the settlement benchmark."
+      }
+    }
+  ],
+  "primary_source_availability": [
+    {
+      "availability_uid": "example:primary-source-availability-001",
+      "primary_source_uid": "example:documented-primary-price-feed",
+      "status": "available",
+      "checked_at": "2026-07-13T12:01:00Z",
+      "first_seen_at": "2026-07-13T12:01:00Z",
+      "retrieved_at": "2026-07-13T12:02:00Z",
+      "ingested_at": "2026-07-13T12:03:00Z",
+      "provenance": {
+        "source_uid": "example:documented-primary-price-feed",
+        "raw_artifact_uid": "example:raw-primary-availability-001",
+        "parser_version": "phase15-primary-availability-example-v1",
+        "content_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "retrieved_at": "2026-07-13T12:02:00Z",
+        "source_url": "https://benchmark.example/documented-primary-feed"
+      },
+      "reliability": {
+        "source_uid": "example:documented-primary-price-feed",
+        "source_class": "primary_source",
+        "tier": "high",
+        "score": "0.90",
+        "assessed_at": "2026-07-13T12:02:00Z",
+        "rationale": "Example raw availability capture from the documented primary feed."
+      }
+    }
+  ]
+}

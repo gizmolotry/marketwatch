@@ -1,0 +1,48 @@
+# Normalize source and documentation files to LF in the repository.
+* text=auto eol=lf
+
+# Binary datasets and databases.
+*.parquet binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+
+# Images, documents, fonts, audio, and video.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.mp3 binary
+*.wav binary
+*.mp4 binary
+*.webm binary
+
+# Archives and compressed artifacts.
+*.zip binary
+*.gz binary
+*.bz2 binary
+*.xz binary
+*.7z binary
+*.tar binary
+
+# Serialized data, indexes, and model weights.
+*.pkl binary
+*.pickle binary
+*.joblib binary
+*.pt binary
+*.pth binary
+*.ckpt binary
+*.onnx binary
+*.safetensors binary
+*.npy binary
+*.npz binary
+*.h5 binary
+*.hdf5 binary
+*.faiss binary

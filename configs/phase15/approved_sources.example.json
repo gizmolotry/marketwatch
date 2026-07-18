@@ -1,0 +1,30 @@
+{
+  "registry_uid": "example:phase15-approved-source-registry",
+  "schema_version": "phase15-source-registry-v1",
+  "targets": [
+    {
+      "target_uid": "example:replace-polymarket-target",
+      "venue": "polymarket",
+      "market_uid": "polymarket:replace-with-captured-condition-id",
+      "polymarket_asset_ids": ["<captured-yes-token-id>", "<captured-no-token-id>"],
+      "metadata_ref": "config:replace-captured-polymarket-metadata",
+      "stream_config_ref": "config:replace-polymarket-stream",
+      "stream_settings": {"max_messages": 1000, "duration_seconds": 60, "max_reconnects": 2},
+      "reference_mapping_uid": "example:replace-documented-btc-mapping"
+    }
+  ],
+  "documented_btc_reference_mappings": [
+    {
+      "mapping_uid": "example:replace-documented-btc-mapping",
+      "target_uid": "example:replace-polymarket-target",
+      "market_rule_source_uid": "example:replace-market-rule-source",
+      "market_rule_source_url": "https://venue.example/replace-rule-artifact",
+      "settlement_source_uid": "example:replace-settlement-source",
+      "settlement_source_url": "https://venue.example/replace-settlement-source",
+      "primary_source_uid": "example:replace-primary-btc-source",
+      "primary_source_url": "https://primary.example/replace-btc-usd-source",
+      "instrument": "BTC-USD",
+      "configured_endpoint_ref": "config:replace-primary-btc-endpoint"
+    }
+  ]
+}

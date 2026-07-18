@@ -1,0 +1,96 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Sprint: countdown",
+      "type": "process",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "$deadline = [DateTimeOffset]::Parse('2026-07-19T00:06:00-07:00'); $remaining = $deadline - [DateTimeOffset]::Now; if ($remaining.TotalSeconds -le 0) { Write-Host 'SPRINT DEADLINE PASSED' -ForegroundColor Red; exit 1 }; Write-Host ('Remaining: {0:00}h {1:00}m {2:00}s | Deadline: 2026-07-19 00:06 PDT' -f [math]::Floor($remaining.TotalHours), $remaining.Minutes, $remaining.Seconds) -ForegroundColor Cyan"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Git: status",
+      "type": "shell",
+      "command": "git",
+      "args": [
+        "status",
+        "--short",
+        "--branch"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: Phase 15",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "-m",
+        "pytest",
+        "tests/phase15",
+        "-q",
+        "--basetemp",
+        "pytest-tmp-phase15-vscode"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: full suite",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "-m",
+        "pytest",
+        "-q",
+        "--basetemp",
+        "pytest-tmp-full-vscode"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Check: capabilities",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "-m",
+        "marketleak.cli_v2",
+        "capabilities"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build: UI",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "build"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/ui"
+      },
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}

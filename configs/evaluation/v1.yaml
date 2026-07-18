@@ -1,0 +1,41 @@
+version: "1"
+targets:
+  - A_activity
+  - B_public_explanation
+  - C_actor_evidence
+labels:
+  binary_values: [positive, negative]
+  excluded_from_binary_metrics: [unknown, unmapped]
+  synthetic_training_eligible: false
+split:
+  strategy: forward_time_event_market_wallet_disjoint
+  drop_components_crossing_boundaries: true
+calibration_gate:
+  min_labeled: 100
+  min_positive: 20
+  min_negative: 20
+  ece_bins: 10
+operations:
+  analyst_capacity: 100
+  false_alert_rate_denominator: 1000_market_days
+metrics:
+  - precision_at_analyst_capacity
+  - recall_at_fixed_budget
+  - false_alerts_per_1000_market_days
+  - median_detection_delay
+  - duplicate_rate
+  - pr_auc
+  - brier_after_label_gate
+  - ece_after_label_gate
+  - B_timeline_false_claim_coverage_abstention
+  - C_actor_visibility_evidence_support_precision
+slices: [platform, category]
+bootstrap:
+  unit: event_cluster
+  samples: 1000
+  confidence: 0.95
+  seed: 7
+baselines: [naive_price_change, naive_volume]
+ablations: all_registered_features
+reporting:
+  insufficient_label_text: "Effectiveness unknown: label sufficiency gate did not pass."

@@ -1,0 +1,88 @@
+{
+  "schema_version": "phase15-review-cases-config-v1",
+  "review_cases": [
+    {
+      "schema_version": "phase15-review-case-v1",
+      "case_uid": "review:simulated-thin-liquidity",
+      "case_kind": "simulated_walkthrough",
+      "published_at": "2026-07-13T12:05:00Z",
+      "as_of": "2026-07-13T12:00:00Z",
+      "venue": "polymarket",
+      "market_uid": "market:simulated-contract-1",
+      "question": "Simulated market mechanism walkthrough",
+      "outcome_uid": "outcome:simulated-yes",
+      "trigger": {
+        "trigger_uid": "trigger:simulated-window-1",
+        "event_uid": "event:simulated-market-1",
+        "window_starts_at": "2026-07-13T11:55:00Z",
+        "window_ends_at": "2026-07-13T11:59:00Z",
+        "observed_at": "2026-07-13T11:59:00Z",
+        "available_at": "2026-07-13T12:00:00Z",
+        "price_open": "0.40",
+        "price_close": "0.61",
+        "price_change": "0.21",
+        "observation_count": 3,
+        "fill_count": 1,
+        "orderbook_snapshot_count": 1,
+        "trade_notional": "5",
+        "raw_artifact_uids": ["raw:simulated-market-frame-1"]
+      },
+      "ordinary_checks": [
+        {
+          "check_uid": "check:simulated-mechanics",
+          "kind": "market_mechanics",
+          "status": "plausible",
+          "coverage_status": "complete",
+          "summary": "Low displayed depth was observed in this simulated walkthrough.",
+          "evidence_uids": ["event:simulated-market-1"]
+        },
+        {
+          "check_uid": "check:simulated-public",
+          "kind": "public_evidence",
+          "status": "unavailable",
+          "coverage_status": "partial",
+          "summary": "No simulated public-evidence coverage is supplied.",
+          "evidence_uids": []
+        }
+      ],
+      "coverage": {
+        "overall_status": "partial",
+        "modality_states": [
+          {
+            "modality": "market_state",
+            "status": "complete",
+            "reason": "Recorded simulated market frame is present."
+          },
+          {
+            "modality": "public_evidence",
+            "status": "partial",
+            "reason": "No simulated public source coverage is supplied."
+          }
+        ],
+        "source_high_watermarks": {"source:simulated-venue": "2026-07-13T12:00:00Z"},
+        "gap_reasons": ["Public source coverage is incomplete."],
+        "raw_receipt_count": 1,
+        "late_excluded_count": 0
+      },
+      "routing": {
+        "decision": "abstain_insufficient_evidence",
+        "coverage_status": "partial",
+        "abstention_reasons": ["public_evidence_coverage_partial"],
+        "mechanism_hypotheses": ["thin_liquidity_artifact"]
+      },
+      "evidence_ledger": [
+        {
+          "evidence_uid": "event:simulated-market-1",
+          "modality": "market_state",
+          "event_time": "2026-07-13T11:59:00Z",
+          "available_at": "2026-07-13T12:00:00Z",
+          "source_uid": "source:simulated-venue",
+          "raw_artifact_uid": "raw:simulated-market-frame-1",
+          "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "reliability_tier": "unassessed"
+        }
+      ]
+    }
+  ],
+  "review_cases_sha256": "2f345b56777eda18106f073bbac5ed20001b4b6a65b582de4854d3983c54cab7"
+}
