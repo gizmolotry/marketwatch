@@ -3,7 +3,7 @@
 This is the visible clock and cut line for the current build. The deadline is **2026-07-19 00:06 America/Los_Angeles (PDT, UTC-07:00)**. The planning reference start is **2026-07-18 04:06 PDT**.
 
 - Sprint tracker: [GitHub Issue #1](https://github.com/gizmolotry/marketwatch/issues/1)
-- Working branch: `codex/20h-market-integrity-demo`
+- Working branch: `feature/20h-market-integrity-demo`
 
 To see the live remaining time in VS Code, run **Terminal → Run Task → Sprint: countdown**. The deadline is fixed; if work starts later, do not slide it. Recalculate remaining time and cut scope.
 
@@ -56,11 +56,11 @@ At every checkpoint, use the rule: **preserve a working vertical slice before wi
 Use one small branch and a sequence of understandable commits. Git is the local history; GitHub is the hosted copy and collaboration surface.
 
 1. **Inspect:** run `git status --short --branch` and `git diff`. In VS Code, open **Source Control** with `Ctrl+Shift+G` and inspect each changed file.
-2. **Branch:** create a focused branch, for example `git switch -c codex/20h-market-integrity-demo`. A branch is an independent line of work, not a copy of the folder.
+2. **Branch:** create a focused branch, for example `git switch -c feature/20h-market-integrity-demo`. A branch is an independent line of work, not a copy of the folder.
 3. **Stage intentionally:** use the `+` button beside only the files that belong together, or run `git add path/to/file`. Staging selects the exact snapshot for the next commit.
 4. **Review:** inspect **Staged Changes** or run `git diff --staged`. Never commit secrets, downloaded corpora, model weights, caches, or runtime output.
 5. **Commit:** write an outcome-oriented message such as `git commit -m "Add causal multi-horizon market features"`. Commit after a coherent, verified slice—not after every keystroke and not only at the end.
-6. **Publish:** after confirming the GitHub remote and authentication, run `git push -u origin codex/20h-market-integrity-demo`. The first push connects the local branch to its GitHub branch.
+6. **Publish:** after confirming the GitHub remote and authentication, run `git push -u origin feature/20h-market-integrity-demo`. The first push connects the local branch to its GitHub branch.
 7. **Pull request:** open the GitHub repository, create a pull request from the branch, summarize what changed, list exact test results, and disclose limitations. The PR becomes the reviewable narrative of the sprint.
 
 Before every commit:
