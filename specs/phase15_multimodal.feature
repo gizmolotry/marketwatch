@@ -406,6 +406,36 @@ Feature: Point-in-time multimodal market-integrity assessment
       And the endpoint does not train, approve, mutate, or publish a model
       And the endpoint does not expose raw sensitive evidence
 
+  Rule: The recorded real-case demo fails closed and remains precomputed
+
+    @implemented @review_case @hash
+    Scenario: Reject a recorded review-case configuration with an inner-hash mismatch
+      Given a frozen review-case configuration contains a supplied "review_cases_sha256"
+      And the supplied digest differs from the canonical hash of its embedded review-case list
+      When the review-case repository loads the configuration
+      Then review-case status is "unavailable"
+      And no review case is returned
+      And a matching digest would establish internal consistency only, not authenticity or external provenance
+
+    @implemented @review_case @point_in_time
+    Scenario: Exclude a recorded review case published after the requested cutoff
+      Given a frozen review case was published after the requested "as_of" cutoff
+      When the review-case CLI or read-only API requests the case at that cutoff
+      Then review-case status is "unavailable_late_configuration"
+      And no late review case is returned
+      And the later packet is not backfilled into the earlier response
+
+    @implemented @review_case @abstention @redaction
+    Scenario: Present the incomplete recorded case as an abstention without live work
+      Given the recorded BTC review case has unavailable public-evidence coverage
+      And its market-mechanics coverage is partial
+      When the review-case CLI or read-only API returns its precomputed safe packet
+      Then routing decision is "abstain_insufficient_evidence"
+      And the response contains redacted lineage identifiers and content hashes but no raw artifact bytes
+      And live fetch is false
+      And live inference is false
+      And no collector or model runtime is invoked
+
   Rule: Outputs cannot assert prohibited conclusions
 
     @target_design @not_current @safety @prohibited_conclusion

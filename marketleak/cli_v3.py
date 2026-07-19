@@ -24,6 +24,7 @@ from marketleak.multimodal.orchestration import (
     build_as_of_assembly,
     train_baseline_candidate,
 )
+from marketleak.multimodal.review_cases import FrozenReviewCaseRepository
 from marketleak.multimodal.schemas import MarketStateSlice, OnChainSettlementFact, PublicDocumentClaim
 from marketleak.multimodal.streaming import redacted_stream_request
 from marketleak.onchain.bitcoin_context import collect_bitcoin_context_once
@@ -238,6 +239,34 @@ def run_polymarket_case_context_collection_command(
     )
 
 
+def run_review_case_command(
+    *,
+    config_path: str | Path,
+    as_of: str,
+    case_uid: str | None = None,
+) -> dict[str, Any]:
+    """Read one frozen review-case configuration without collection or inference."""
+
+    from datetime import datetime
+
+    from marketleak.multimodal.schemas import _utc
+
+    cutoff = _utc(datetime.fromisoformat(as_of.replace("Z", "+00:00")), field_name="as_of")
+    repository = FrozenReviewCaseRepository(config_path)
+    packet = (
+        repository.payload(as_of=cutoff)
+        if case_uid is None
+        else repository.case_payload(case_uid, as_of=cutoff)
+    )
+    return {
+        "command": "review-case",
+        "as_of": cutoff.isoformat().replace("+00:00", "Z"),
+        **packet,
+        "not_proof_of_fraud": True,
+        "effectiveness_unknown": True,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="marketleak-v3", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -245,6 +274,16 @@ def build_parser() -> argparse.ArgumentParser:
         command = commands.add_parser(name)
         command.add_argument("--input", required=True, help="Read-only Phase 15 JSON input")
         command.add_argument("--as-of", required=True, help="UTC ISO-8601 causal cutoff")
+    review_case = commands.add_parser(
+        "review-case",
+        help="Read one hash-checked frozen review-case configuration",
+    )
+    review_case.add_argument("--config", required=True, help="Frozen review-case configuration JSON")
+    review_case.add_argument("--as-of", required=True, help="UTC ISO-8601 causal cutoff")
+    review_case.add_argument(
+        "--case-uid",
+        help="Optional exact case UID; omission returns all cases admitted by the cutoff",
+    )
     stream = commands.add_parser(
         "stream-market",
         help="Validate a bounded, server-transport-injected market stream request",
@@ -360,6 +399,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 target_uid=args.target_uid,
                 output_dir=args.output_dir,
             )
+        elif args.command == "review-case":
+            payload = run_review_case_command(
+                config_path=args.config,
+                as_of=args.as_of,
+                case_uid=args.case_uid,
+            )
         else:
             payload = run_command(args.command, input_path=args.input, as_of=args.as_of)
     except (OSError, ValueError, ValidationError, json.JSONDecodeError) as exc:
@@ -369,6 +414,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "reason_code": type(exc).__name__,
         }
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str))
+    if args.command == "review-case" and payload.get("status") != "available_precomputed_review_cases":
+        return 2
     return 0
 
 

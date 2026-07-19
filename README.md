@@ -63,21 +63,55 @@ python -m marketleak.cli_v2 collect-evidence-once `
 
 See [data and evidence operations](docs/data-and-evidence.md) for the source-capability and lineage rules.
 
-## Phase 15: read-only orchestration
+## Recorded real-case demo
 
-`cli_v3` accepts a local JSON request, freezes the supplied facts at `--as-of`, and prints one JSON result. It does **not** contact a service, retrieve a live index, write artifacts, train/persist weights, approve a candidate, or serve a model.
+The repository includes one tracked, hash-checked safe review packet at [configs/phase15/polymarket_btc65k_review_case.json](configs/phase15/polymarket_btc65k_review_case.json), exported from a local bounded public Polymarket/Binance co-capture for “Will Bitcoin reach $65,000 in July?” The tracked packet includes the frozen trigger, coverage and abstention state, redacted lineage identifiers, individual content hashes, and a canonical `review_cases_sha256` value.
+
+The raw capture directory and its 319 raw receipt objects are local runtime data and are not shipped in a fresh clone. The `review_cases_sha256` value verifies internal consistency between the embedded review-case list and its digest only. It does not establish authenticity, authenticate a publisher, prove source provenance, or verify any unshipped raw artifact. A clone can validate the safe packet's schema and canonical inner hash, but cannot independently re-hash every raw object named by its lineage. This is recorded public data, not a simulated effectiveness example. The observed market price moved from `0.60` to `0.72` across the selected window, but there are no verified fills or order-book snapshots in the packet. Public-evidence coverage is unavailable and market-mechanics coverage is partial, so the recorded decision is `abstain_insufficient_evidence`. It is not evidence of fraud, intent, identity, or model effectiveness.
+
+### Inspect the frozen packet with the CLI
 
 ```powershell
-python -m marketleak.cli_v3 assemble `
-  --input data/phase15/request.json `
-  --as-of 2026-07-13T12:00:00Z
-
-python -m marketleak.cli_v3 readiness `
-  --input data/phase15/request.json `
-  --as-of 2026-07-13T12:00:00Z
+python -m marketleak.cli_v3 review-case `
+  --config configs/phase15/polymarket_btc65k_review_case.json `
+  --as-of 2026-07-14T00:38:53.861000Z `
+  --case-uid "review:polymarket-btc65k-cocaptured"
 ```
 
-`train-baseline` is retained as a compatibility command name for an in-memory candidate-evaluation workflow. It does not publish, serialize, deploy, or serve a model.
+This command validates the configuration hash and causal cutoff, then prints the precomputed safe packet. It performs no collection, model loading, or inference.
+
+### Run the read-only API and UI
+
+In a PowerShell terminal at the repository root:
+
+```powershell
+$env:MARKETLEAK_V3_REVIEW_CASES_CONFIG = (Resolve-Path "configs/phase15/polymarket_btc65k_review_case.json").Path
+python -m uvicorn marketleak.api:app --host 127.0.0.1 --port 8000
+```
+
+With the API running, inspect the list or the exact case:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/v3/review-cases" |
+  ConvertTo-Json -Depth 20
+
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/v3/review-cases/review%3Apolymarket-btc65k-cocaptured" |
+  ConvertTo-Json -Depth 20
+```
+
+In a second terminal:
+
+```powershell
+Set-Location ui
+npm ci
+npm run dev
+```
+
+Open [http://localhost:5173/evidence-review](http://localhost:5173/evidence-review). The browser reads the precomputed API packet; it does not receive credentials, fetch live market data, or perform inference.
+
+### Phase 15 orchestration is a separate research path
+
+The `assemble`, `readiness`, and compatibility-named `train-baseline` commands require a caller-created JSON document containing `events`, `features`, and an optional evaluation `plan`. The repository does not ship a `data/phase15/request.json`, and the recorded review-case configuration is intentionally not an orchestration request. `train-baseline` performs only an in-memory candidate evaluation; it does not publish, serialize, deploy, or serve a model.
 
 The full architecture, gates, and operating workflow are in [Phase 15 multimodal architecture](docs/phase15-multimodal.md).
 
@@ -103,6 +137,8 @@ When a hash-verified immutable bundle pointer is present, the API may expose met
 - `GET /api/v3/readiness`
 - `GET /api/v3/model-status`
 - `GET /api/v3/assessments`
+- `GET /api/v3/review-cases`
+- `GET /api/v3/review-cases/{case_uid}`
 - `GET /api/v3/retrieval/{event_uid}`
 - `GET /api/v3/events/{event_uid}`
 
@@ -111,7 +147,10 @@ These endpoints never load model weights, perform live inference, call an LLM, r
 ## Tests
 
 ```powershell
-pytest -q --basetemp pytest-tmp-current
+$testTemp = Join-Path $env:TEMP "marketwatch-pytest"
+pytest -q --basetemp $testTemp
 ```
+
+Keeping pytest's temporary tree outside the checkout preserves tests that require a genuinely non-repository directory.
 
 Further reading: [v2 architecture](docs/architecture-v2.md), [architecture blueprint](docs/architecture-blueprint.md), [data and evidence](docs/data-and-evidence.md), [Phase 15 architecture](docs/phase15-multimodal.md), [20-hour sprint plan](docs/SPRINT-20H.md), [Phase 15 Gherkin contract](specs/phase15_multimodal.feature), and [validation and shadow](docs/validation-and-shadow.md).

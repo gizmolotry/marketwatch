@@ -1,0 +1,184 @@
+{
+  "review_cases": [
+    {
+      "as_of": "2026-07-14T00:38:53.861000Z",
+      "case_kind": "recorded_snapshot",
+      "case_uid": "review:polymarket-btc65k-cocaptured",
+      "coverage": {
+        "gap_reasons": [
+          "public_evidence_unavailable",
+          "market_mechanics_partial"
+        ],
+        "late_excluded_count": 0,
+        "modality_states": [
+          {
+            "modality": "market_state",
+            "reason": "Selected market observations and verified raw receipts are local.",
+            "status": "complete"
+          },
+          {
+            "modality": "market_context",
+            "reason": "Fixed Gamma/CLOB context and raw lineage matched the registered target.",
+            "status": "complete"
+          },
+          {
+            "modality": "reference_price",
+            "reason": "Documented final BTC/USDT candle-high reference is available.",
+            "status": "complete"
+          },
+          {
+            "modality": "public_evidence",
+            "reason": "Point-in-time public evidence was not captured.",
+            "status": "unavailable"
+          }
+        ],
+        "overall_status": "partial",
+        "raw_receipt_count": 319,
+        "source_high_watermarks": {
+          "polymarket:source/clob-market-info": "2026-07-14T00:36:38.285777Z",
+          "polymarket:source/gamma-market": "2026-07-14T00:36:38.285777Z",
+          "polymarket:source/ws-market": "2026-07-14T00:38:53.861000Z",
+          "source:binance-spot-btcusdt-kline": "2026-07-14T00:36:59.276577Z"
+        }
+      },
+      "evidence_ledger": [
+        {
+          "available_at": "2026-07-14T00:36:54.849000Z",
+          "content_hash": "fdf758697aa94ce0760646db517a363bf9476062ba1aa2e46331528d61c79729",
+          "event_time": "2026-07-14T00:36:54.849000Z",
+          "evidence_uid": "polymarket:ws-level:988d93c5fba66b41efb68455a0c425338ae987a9deea82ef1a3f14afe049dbac",
+          "modality": "market_state",
+          "raw_artifact_uid": "polymarket:raw/fdf758697aa94ce0760646db517a363bf9476062ba1aa2e46331528d61c79729",
+          "reliability_tier": "unassessed",
+          "source_uid": "polymarket:source/ws-market"
+        },
+        {
+          "available_at": "2026-07-14T00:38:53.861000Z",
+          "content_hash": "7376e7d07ed8d25fb2cfb1d8e50575ff861488ffa236945a54a4ee1108f3d4a6",
+          "event_time": "2026-07-14T00:38:53.861000Z",
+          "evidence_uid": "polymarket:ws-level:8e7ee3cc7c8bed353224f941d560aaf854a44b7af85cf9bde74a17d4ffba01f5",
+          "modality": "market_state",
+          "raw_artifact_uid": "polymarket:raw/7376e7d07ed8d25fb2cfb1d8e50575ff861488ffa236945a54a4ee1108f3d4a6",
+          "reliability_tier": "unassessed",
+          "source_uid": "polymarket:source/ws-market"
+        },
+        {
+          "available_at": "2026-07-14T00:36:38.285777Z",
+          "content_hash": "23384ceffcac08686065acdab95f8d7f1ac7178371739b574f1adce0775685bf",
+          "event_time": "2026-07-14T00:36:38.285777Z",
+          "evidence_uid": "polymarket:case-context/0xc9c9790c8f26dd9c8cabae9dd76be37aa86a6ded7de660e1da9d19324cf618d4/gamma-market/23384ceffcac08686065acdab95f8d7f1ac7178371739b574f1adce0775685bf",
+          "modality": "market_context",
+          "raw_artifact_uid": "polymarket:raw/23384ceffcac08686065acdab95f8d7f1ac7178371739b574f1adce0775685bf",
+          "reliability_tier": "high",
+          "source_uid": "polymarket:source/gamma-market"
+        },
+        {
+          "available_at": "2026-07-14T00:36:38.285777Z",
+          "content_hash": "e605288056c4cd0abb4e3fa00bc4313a8879e13d24cca7d090cdde7f9946f2c9",
+          "event_time": "2026-07-14T00:36:38.285777Z",
+          "evidence_uid": "polymarket:case-context/0xc9c9790c8f26dd9c8cabae9dd76be37aa86a6ded7de660e1da9d19324cf618d4/clob-market-info/e605288056c4cd0abb4e3fa00bc4313a8879e13d24cca7d090cdde7f9946f2c9",
+          "modality": "market_context",
+          "raw_artifact_uid": "polymarket:raw/e605288056c4cd0abb4e3fa00bc4313a8879e13d24cca7d090cdde7f9946f2c9",
+          "reliability_tier": "high",
+          "source_uid": "polymarket:source/clob-market-info"
+        },
+        {
+          "available_at": "2026-07-14T00:37:00.016000Z",
+          "content_hash": "8e0be58528b3411c58f32e7bf382e19795fbf500b5476277c6e2dfebe89b0c3c",
+          "event_time": "2026-07-14T00:36:59.999000Z",
+          "evidence_uid": "binance:reference-price/0xc9c9790c8f26dd9c8cabae9dd76be37aa86a6ded7de660e1da9d19324cf618d4/20260714T003659999000Z/8e0be58528b3411c58f32e7bf382e19795fbf500b5476277c6e2dfebe89b0c3c",
+          "modality": "reference_price",
+          "raw_artifact_uid": "binance:raw/8e0be58528b3411c58f32e7bf382e19795fbf500b5476277c6e2dfebe89b0c3c",
+          "reliability_tier": "high",
+          "source_uid": "source:binance-spot-btcusdt-kline"
+        }
+      ],
+      "market_uid": "polymarket:market/0xc9c9790c8f26dd9c8cabae9dd76be37aa86a6ded7de660e1da9d19324cf618d4",
+      "ordinary_checks": [
+        {
+          "check_uid": "check:polymarket-btc65k-cocaptured-collection-health",
+          "coverage_status": "complete",
+          "evidence_uids": [
+            "polymarket:ws-level:988d93c5fba66b41efb68455a0c425338ae987a9deea82ef1a3f14afe049dbac",
+            "polymarket:ws-level:8e7ee3cc7c8bed353224f941d560aaf854a44b7af85cf9bde74a17d4ffba01f5"
+          ],
+          "kind": "collection_health",
+          "status": "observed",
+          "summary": "Selected local market observations and their raw receipts are available within the co-captured cutoff."
+        },
+        {
+          "check_uid": "check:polymarket-btc65k-cocaptured-market-context",
+          "coverage_status": "complete",
+          "evidence_uids": [
+            "polymarket:case-context/0xc9c9790c8f26dd9c8cabae9dd76be37aa86a6ded7de660e1da9d19324cf618d4/gamma-market/23384ceffcac08686065acdab95f8d7f1ac7178371739b574f1adce0775685bf",
+            "polymarket:case-context/0xc9c9790c8f26dd9c8cabae9dd76be37aa86a6ded7de660e1da9d19324cf618d4/clob-market-info/e605288056c4cd0abb4e3fa00bc4313a8879e13d24cca7d090cdde7f9946f2c9"
+          ],
+          "kind": "market_context",
+          "status": "observed",
+          "summary": "Fixed Gamma market context and CLOB Yes/No token mapping matched the co-captured target; resolutionSource was null or absent, recorded explicitly in the context manifest, and the captured rule text is retained in raw lineage."
+        },
+        {
+          "check_uid": "check:polymarket-btc65k-cocaptured-underlying-reference",
+          "coverage_status": "complete",
+          "evidence_uids": [
+            "binance:reference-price/0xc9c9790c8f26dd9c8cabae9dd76be37aa86a6ded7de660e1da9d19324cf618d4/20260714T003659999000Z/8e0be58528b3411c58f32e7bf382e19795fbf500b5476277c6e2dfebe89b0c3c"
+          ],
+          "kind": "underlying_reference",
+          "status": "observed",
+          "summary": "A raw-lineaged Binance BTC/USDT final 1-minute candle High was available at the co-capture cutoff."
+        },
+        {
+          "check_uid": "check:polymarket-btc65k-cocaptured-public-evidence",
+          "coverage_status": "unavailable",
+          "evidence_uids": [],
+          "kind": "public_evidence",
+          "status": "unavailable",
+          "summary": "Point-in-time public evidence is not captured in this bounded co-capture."
+        },
+        {
+          "check_uid": "check:polymarket-btc65k-cocaptured-market-mechanics",
+          "coverage_status": "partial",
+          "evidence_uids": [],
+          "kind": "market_mechanics",
+          "status": "unavailable",
+          "summary": "Depth and traded-notional coverage are incomplete; this case contains selected price observations only."
+        }
+      ],
+      "outcome_uid": "polymarket:outcome/37863990088639017224129863896084706036599112986230542056774425461928248691792",
+      "published_at": "2026-07-14T00:38:53.861000Z",
+      "question": "Will Bitcoin reach $65,000 in July?",
+      "routing": {
+        "abstention_reasons": [
+          "public_evidence_unavailable",
+          "market_mechanics_partial"
+        ],
+        "coverage_status": "partial",
+        "decision": "abstain_insufficient_evidence",
+        "mechanism_hypotheses": []
+      },
+      "schema_version": "phase15-review-case-v1",
+      "trigger": {
+        "available_at": "2026-07-14T00:38:53.861000Z",
+        "event_uid": "polymarket:ws-level:8e7ee3cc7c8bed353224f941d560aaf854a44b7af85cf9bde74a17d4ffba01f5",
+        "fill_count": 0,
+        "observation_count": 298,
+        "observed_at": "2026-07-14T00:38:53.861000Z",
+        "orderbook_snapshot_count": 0,
+        "price_change": "0.12",
+        "price_close": "0.72",
+        "price_open": "0.6",
+        "raw_artifact_uids": [
+          "polymarket:raw/fdf758697aa94ce0760646db517a363bf9476062ba1aa2e46331528d61c79729",
+          "polymarket:raw/7376e7d07ed8d25fb2cfb1d8e50575ff861488ffa236945a54a4ee1108f3d4a6"
+        ],
+        "trade_notional": null,
+        "trigger_uid": "trigger:polymarket-btc65k-cocaptured-window",
+        "window_ends_at": "2026-07-14T00:38:53.861000Z",
+        "window_starts_at": "2026-07-14T00:36:54.849000Z"
+      },
+      "venue": "polymarket"
+    }
+  ],
+  "review_cases_sha256": "f0d6352156985a268cb35f73a6bfcaa0a771717aa947208b59b40e9e2639d131",
+  "schema_version": "phase15-review-cases-config-v1"
+}

@@ -36,7 +36,7 @@
         "tests/phase15",
         "-q",
         "--basetemp",
-        "pytest-tmp-phase15-vscode"
+        "${env:TEMP}/marketleak-pytest-phase15-vscode"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -56,7 +56,7 @@
         "pytest",
         "-q",
         "--basetemp",
-        "pytest-tmp-full-vscode"
+        "${env:TEMP}/marketleak-pytest-full-vscode"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -90,6 +90,92 @@
         "cwd": "${workspaceFolder}/ui"
       },
       "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Demo: API (recorded case)",
+      "type": "process",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "$env:MARKETLEAK_V3_REVIEW_CASES_CONFIG = (Resolve-Path (Join-Path '${workspaceFolder}' 'configs/phase15/polymarket_btc65k_review_case.json')).Path; python -m uvicorn marketleak.api:app --host 127.0.0.1 --port 8000"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": {
+        "owner": "marketleak-demo-api",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Started server process",
+          "endsPattern": "Uvicorn running on http://127\\.0\\.0\\.1:8000"
+        }
+      }
+    },
+    {
+      "label": "Demo: UI",
+      "type": "process",
+      "command": "npm",
+      "args": [
+        "run",
+        "dev",
+        "--",
+        "--host",
+        "127.0.0.1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/ui"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": {
+        "owner": "marketleak-demo-ui",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "VITE",
+          "endsPattern": "Local:.*http://127\\.0\\.0\\.1:5173"
+        }
+      }
+    },
+    {
+      "label": "Demo: launch API + UI",
+      "dependsOrder": "parallel",
+      "dependsOn": [
+        "Demo: API (recorded case)",
+        "Demo: UI"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Demo: verify recorded case (CLI)",
+      "type": "process",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "$ErrorActionPreference = 'Stop'; $output = @(& python -m marketleak.cli_v3 review-case --config 'configs/phase15/polymarket_btc65k_review_case.json' --as-of '2026-07-14T00:38:53.861000Z' --case-uid 'review:polymarket-btc65k-cocaptured' 2>&1); $cliExitCode = $LASTEXITCODE; $output | ForEach-Object { Write-Output $_ }; if ($cliExitCode -ne 0) { [Console]::Error.WriteLine('Recorded demo CLI exited with code {0}.' -f $cliExitCode); exit $cliExitCode }; try { $payload = ($output -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop } catch { [Console]::Error.WriteLine('Recorded demo CLI did not return valid JSON: {0}' -f $_.Exception.Message); exit 1 }; $failures = [Collections.Generic.List[string]]::new(); if ($payload.status -cne 'available_precomputed_review_cases') { $failures.Add('status must be available_precomputed_review_cases') }; if ($null -eq $payload.case -or $payload.case.case_uid -cne 'review:polymarket-btc65k-cocaptured') { $failures.Add('case UID does not match the frozen recorded case') }; if ($null -eq $payload.case -or $payload.case.routing.decision -cne 'abstain_insufficient_evidence') { $failures.Add('routing decision must be abstain_insufficient_evidence') }; if ($payload.not_proof_of_fraud -ne $true) { $failures.Add('not_proof_of_fraud must be true') }; if ($payload.effectiveness_unknown -ne $true) { $failures.Add('effectiveness_unknown must be true') }; if ($payload.read_only -ne $true) { $failures.Add('read_only must be true') }; if ($payload.live_fetch -ne $false) { $failures.Add('live_fetch must be false') }; if ($payload.live_inference -ne $false) { $failures.Add('live_inference must be false') }; if ($failures.Count -gt 0) { $failures | ForEach-Object { [Console]::Error.WriteLine('Verification failed: {0}' -f $_) }; exit 1 }; Write-Host 'Recorded demo verification passed.' -ForegroundColor Green"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test",
       "problemMatcher": []
     }
   ]
