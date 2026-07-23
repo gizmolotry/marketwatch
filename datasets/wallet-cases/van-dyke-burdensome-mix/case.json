@@ -1,0 +1,88 @@
+{
+  "bundle_version": "1.0.0",
+  "case_uid": "wallet-case:cftc-doj-van-dyke-burdensome-mix-2026",
+  "event_cluster_uid": "event-cluster:venezuela-polymarket-2025-12-27-2026-01-03",
+  "title": "Van Dyke / Burdensome-Mix Polymarket case reconstruction",
+  "platform": "polymarket",
+  "wallet": "0x31a56e9e690c621ed21de08cb559e9524cdb8ed9",
+  "actor_uid": "polymarket:wallet/0x31a56e9e690c621ed21de08cb559e9524cdb8ed9",
+  "actor_visibility": "public_wallet",
+  "pseudonym_observed": "Burdensome-Mix",
+  "mapping": {
+    "grade": "officially_corroborated_public_proxy_wallet",
+    "limitations": [
+      "The CFTC complaint identifies the handle and a masked 0x31a5...8ed9 address; the full address is matched from the public Polymarket Data API delivery by handle and exact trade sequence.",
+      "The mapping does not prove beneficial ownership, identity, common control, information access, intent, or liability."
+    ],
+    "source_urls": [
+      "https://www.cftc.gov/media/13761/EnfGannonKenVanDykeComplaint042326/download",
+      "https://data-api.polymarket.com/trades?user=0x31a56e9e690c621ed21de08cb559e9524cdb8ed9&limit=10000&offset=0"
+    ]
+  },
+  "decision_cutoff": "2026-01-03T02:58:25.000000Z",
+  "claimed_first_public_announcement_time": "2026-01-03T09:21:00.000000Z",
+  "collection": {
+    "received_at": "2026-07-19T20:38:36.065334Z",
+    "fetched_at": "2026-07-19T20:38:36.206855Z",
+    "query_uid": "polymarket:wallet-replay-query/5fe7fa2a0956d3d3dfb6b473b1e8e68b6c8a4a311fc46f85ee0c8efda8e9d48e",
+    "raw_sha256": "9eac0ab947a8591575a96343eb4ee9141ee572986f425e34b98d353381460d70",
+    "receipt": {
+      "path": "raw/receipts/2026-07-19/20260719T203836.065334Z-a940d896c6b048d2966e6058dd83d6af.json",
+      "sanitization_policy": "sensitive_response_header_removal_v1",
+      "source_receipt_sha256": "cae4e4ee603a2037c0c26a332dc6e77e676182bc12d41c96f963020700a2f1b9",
+      "removed_header_count": 1,
+      "removed_values_retained": false
+    },
+    "record_count": 15,
+    "event_time_at_or_before_cutoff_count": 13,
+    "prospective_eligible_at_cutoff_count": 0,
+    "post_cutoff_record_count": 2,
+    "wallet_query_coverage": "complete_at_retrieval_for_recorded_filters",
+    "contemporaneous_wallet_coverage_at_cutoff": "unavailable",
+    "public_information_coverage_at_cutoff": "unknown",
+    "limitations": [
+      "All canonical fills were ingested after the decision cutoff, so none is eligible for a prospective-at-cutoff feature row.",
+      "Endpoint exhaustion supports the recorded exact-query coverage statement only; it does not prove contemporaneous collection or complete public-information coverage.",
+      "The public endpoint does not establish maker/taker identity or beneficial ownership."
+    ]
+  },
+  "replay_policy": {
+    "prospective_at_cutoff": "blocked_no_contemporaneously_available_fills",
+    "retrospective_forensic": "hindsight_reconstructed",
+    "audit_context_only": true,
+    "training_eligible": false,
+    "effectiveness_status": "effectiveness_unknown",
+    "absence_claims_allowed": false,
+    "identity_attribution_allowed": false,
+    "fraud_probability_allowed": false
+  },
+  "replay_output": {
+    "path": "replay-report.json",
+    "query_uid": "polymarket:wallet-replay-query/5fe7fa2a0956d3d3dfb6b473b1e8e68b6c8a4a311fc46f85ee0c8efda8e9d48e",
+    "analysis_input_sha256": "a656da1bf7f21d6a95e5f031843275cd1f401e06989f2159ac7de12d4b9619bb",
+    "report_sha256": "861f677d45e7c9bc8ddaa82461eaf14480e3538301907ee968bc339425a7f588",
+    "canonical_file_sha256": "a00dac14e3accd353e497e4fd16777202cc0beff8db8792c2d02603ff4d7dd95",
+    "byte_length": 12584,
+    "generator": "load_wallet_case_bundle.replay.canonical_bytes"
+  },
+  "legal_audit": {
+    "procedural_status": "alleged_pending",
+    "use": "audit_context_only",
+    "cutoff_feature_eligible": false,
+    "source_urls": [
+      "https://www.cftc.gov/PressRoom/PressReleases/9217-26",
+      "https://www.cftc.gov/media/13761/EnfGannonKenVanDykeComplaint042326/download",
+      "https://www.justice.gov/opa/pr/us-soldier-charged-using-classified-information-profit-prediction-market-bets"
+    ],
+    "limitations": [
+      "Civil allegations and criminal charges are not adjudicated findings of fraud.",
+      "The legal records postdate the decision cutoff and cannot enter cutoff features.",
+      "No locally captured raw legal-document artifact is included in this bundle."
+    ]
+  },
+  "claims_boundary": [
+    "This is a retrospective forensic reconstruction, not a historical live alert or prospective validation.",
+    "Descriptive activity, novelty, or case resemblance does not establish fraud, identity, intent, access, or legal liability.",
+    "This bundle is not training eligible."
+  ]
+}

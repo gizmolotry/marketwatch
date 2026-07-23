@@ -12,6 +12,35 @@ from ..normalize import parse_json_decimal
 from ..raw_store import RawArtifactStore, RawCapture
 
 
+_SAFE_RESPONSE_HEADERS = frozenset(
+    {
+        "age",
+        "cache-control",
+        "content-length",
+        "content-type",
+        "date",
+        "etag",
+        "expires",
+        "last-modified",
+        "request-id",
+        "retry-after",
+        "traceparent",
+        "x-request-id",
+    }
+)
+
+
+def _safe_response_headers(headers: Mapping[str, Any]) -> dict[str, str]:
+    """Return a deterministic allowlist that cannot persist auth material."""
+
+    safe: dict[str, str] = {}
+    for name, value in sorted(headers.items(), key=lambda item: str(item[0]).lower()):
+        normalized = str(name).strip().lower()
+        if normalized in _SAFE_RESPONSE_HEADERS:
+            safe[normalized] = str(value)
+    return safe
+
+
 @dataclass(frozen=True, slots=True)
 class HttpResponse:
     status_code: int
@@ -95,7 +124,7 @@ class EvidenceHttpClient:
                 response_metadata={
                     "status_code": response.status_code,
                     "url": response.url,
-                    "headers": dict(response.headers),
+                    "headers": _safe_response_headers(response.headers),
                 },
             )
             if 200 <= response.status_code < 300:

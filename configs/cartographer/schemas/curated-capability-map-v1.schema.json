@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://marketleak.local/schemas/curated-capability-map-v1.schema.json",
+  "title": "Repo Cartographer curated capability profile v1",
+  "description": "Authoring schema for the versioned profile that deterministically projects a verified inventory into a curated capability map.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "profile_id", "title", "capabilities"],
+  "properties": {
+    "format": {"const": "repo-cartographer-curated-profile/v1"},
+    "profile_id": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "description", "selectors"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "title": {"type": "string", "minLength": 1},
+          "description": {"type": "string", "minLength": 1},
+          "selectors": {
+            "type": "array",
+            "minItems": 1,
+            "contains": {
+              "type": "object",
+              "required": ["required"],
+              "properties": {"required": {"const": true}}
+            },
+            "minContains": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "value", "required"],
+              "properties": {
+                "kind": {"enum": ["capability", "test_capability", "scenario", "scenario_tag", "artifact_path"]},
+                "value": {"type": "string", "minLength": 1},
+                "required": {"type": "boolean"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

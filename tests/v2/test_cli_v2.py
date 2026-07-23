@@ -7,14 +7,17 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+import marketleak.cli_v2 as cli_v2_module
 from marketleak.cli_v2 import (
     audit_legacy_fixture,
     collect_once,
+    collect_polymarket_wallet_history,
     create_shadow_run,
     main,
     run_shadow_cycle,
     verify_shadow_run,
 )
+from marketleak.ingestion.coverage import CoverageLedger
 from marketleak.ingestion.connectors.http import EvidenceHttpClient, HttpResponse
 from marketleak.ingestion.raw_store import RawArtifactStore
 
@@ -82,6 +85,188 @@ def test_collect_once_is_bounded_and_writes_raw_before_normalized(tmp_path):
     assert list((output / "raw" / "objects").rglob("*.raw"))
     assert list((output / "normalized" / "trade_fill").rglob("*.json"))
     assert (output / "coverage" / "ledger.jsonl").is_file()
+
+
+def test_wallet_history_cli_serializes_all_explicit_operator_inputs(monkeypatch, capsys):
+    captured = {}
+
+    def fake_collect(**kwargs):
+        captured.update(kwargs)
+        return {"command": "collect-polymarket-wallet", "complete": False}
+
+    monkeypatch.setattr(cli_v2_module, "collect_polymarket_wallet_history", fake_collect)
+    assert main(
+        [
+            "collect-polymarket-wallet",
+            "--output-dir",
+            "wallet-data",
+            "--user",
+            "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+            "--start",
+            "2026-01-01T00:00:00Z",
+            "--end",
+            "2026-01-02T00:00:00Z",
+            "--continuation",
+            "opaque-cursor",
+            "--page-size",
+            "250",
+            "--max-pages",
+            "4",
+            "--taker-only",
+        ]
+    ) == 0
+
+    assert json.loads(capsys.readouterr().out)["command"] == "collect-polymarket-wallet"
+    assert captured == {
+        "output_dir": "wallet-data",
+        "user": "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+        "start": datetime(2026, 1, 1, tzinfo=UTC),
+        "end": datetime(2026, 1, 2, tzinfo=UTC),
+        "continuation": "opaque-cursor",
+        "page_size": 250,
+        "max_pages": 4,
+        "taker_only": True,
+    }
+
+    for unsupported_scope in (("--market", "condition-1"), ("--event-id", "1")):
+        with pytest.raises(SystemExit):
+            main(
+                [
+                    "collect-polymarket-wallet",
+                    "--user",
+                    "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+                    *unsupported_scope,
+                ]
+            )
+
+
+def test_wallet_history_collection_persists_filter_bound_coverage_and_resumes(tmp_path):
+    output = tmp_path / "wallet-history"
+    trade = b'''[{"proxyWallet":"0x56687bf447db6ffa42ffe2204a05edaa20f55839","side":"BUY","asset":"yes","conditionId":"condition","size":2.0,"price":0.6,"timestamp":1767225600,"outcomeIndex":0,"transactionHash":"0xabc"}]'''
+    transport = StubTransport([(200, trade), (200, b"[]")])
+    http = EvidenceHttpClient(
+        RawArtifactStore(output / "raw"), transport=transport, sleep=lambda _: None
+    )
+
+    first = collect_polymarket_wallet_history(
+        output_dir=output,
+        user="0x56687BF447DB6FFA42FFE2204A05EDAA20F55839",
+        page_size=1,
+        max_pages=1,
+        http_client=http,
+        clock=lambda: datetime(2026, 1, 2, 0, 0, 1, tzinfo=UTC),
+    )
+    resumed = collect_polymarket_wallet_history(
+        output_dir=output,
+        user="0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+        continuation=first["continuation"],
+        page_size=1,
+        max_pages=1,
+        http_client=http,
+        clock=lambda: (_ for _ in ()).throw(
+            AssertionError("resume must inherit end from the continuation")
+        ),
+    )
+
+    expected_filters = {
+        "end": 1767312000,
+        "start": 1,
+        "takerOnly": False,
+        "user": "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+    }
+    assert first["complete"] is False
+    assert first["continuation_state"] == "page"
+    assert resumed["complete"] is True
+    assert resumed["continuation"] is None
+    assert resumed["query_filters"] == expected_filters
+    assert resumed["coverage"]["filters"] == expected_filters
+    assert resumed["coverage"]["record_count"] == 1
+    assert len(resumed["coverage"]["raw_sha256"]) == 2
+    assert [call[2]["offset"] for call in transport.calls] == [0, 1]
+    assert all(call[2]["takerOnly"] is False for call in transport.calls)
+    assert list((output / "raw" / "objects").rglob("*.raw"))
+    assert list((output / "normalized" / "trade_fill").rglob("*.json"))
+
+    rows = CoverageLedger(output / "coverage" / "ledger.jsonl").records(
+        platform="polymarket", dataset="public_wallet_trades"
+    )
+    assert len(rows) == 2
+    assert rows[0].complete is False
+    assert rows[1].complete is True
+    assert dict(rows[1].filters) == expected_filters
+    assert rows[1].interval_start == datetime.fromtimestamp(1, tz=UTC)
+    assert rows[1].interval_end == datetime(2026, 1, 2, tzinfo=UTC)
+
+
+def test_wallet_history_cli_surfaces_split_required_without_complete_coverage(tmp_path):
+    output = tmp_path / "wallet-ceiling"
+    trade = b'''[{"proxyWallet":"0x56687bf447db6ffa42ffe2204a05edaa20f55839","side":"BUY","asset":"yes","conditionId":"condition","size":2.0,"price":0.6,"timestamp":1767225600,"outcomeIndex":0,"transactionHash":"0xabc"}]'''
+    transport = StubTransport([(200, trade)])
+    http = EvidenceHttpClient(
+        RawArtifactStore(output / "raw"), transport=transport, sleep=lambda _: None
+    )
+
+    payload = collect_polymarket_wallet_history(
+        output_dir=output,
+        user="0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+        end=datetime(2026, 1, 2, tzinfo=UTC),
+        continuation="10000",
+        page_size=1,
+        max_pages=1,
+        http_client=http,
+    )
+
+    assert payload["complete"] is False
+    assert payload["coverage"]["complete"] is False
+    assert payload["continuation_state"] == "split_required"
+    assert payload["requires_narrower_time_window"] is True
+    assert json.loads(payload["continuation"])["state"] == "split_required"
+
+
+def test_wallet_history_cli_rejects_subsecond_coverage_bounds(tmp_path):
+    output = tmp_path / "wallet-subsecond"
+    transport = StubTransport([])
+    http = EvidenceHttpClient(
+        RawArtifactStore(output / "raw"), transport=transport, sleep=lambda _: None
+    )
+
+    with pytest.raises(ValueError, match="end must use whole-second"):
+        collect_polymarket_wallet_history(
+            output_dir=output,
+            user="0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+            end=datetime(2026, 1, 2, 0, 0, 0, 1, tzinfo=UTC),
+            http_client=http,
+        )
+
+    assert transport.calls == []
+    assert not (output / "coverage" / "ledger.jsonl").exists()
+
+
+def test_wallet_history_cli_rejects_remote_market_or_event_scope_before_network(tmp_path):
+    output = tmp_path / "wallet-remote-scope"
+    transport = StubTransport([])
+    http = EvidenceHttpClient(
+        RawArtifactStore(output / "raw"), transport=transport, sleep=lambda _: None
+    )
+    wallet = "0x56687bf447db6ffa42ffe2204a05edaa20f55839"
+
+    with pytest.raises(ValueError, match="user-only.*local normalized index"):
+        collect_polymarket_wallet_history(
+            output_dir=output,
+            user=wallet,
+            market="condition-1",
+            http_client=http,
+        )
+    with pytest.raises(ValueError, match="user-only.*local normalized index"):
+        collect_polymarket_wallet_history(
+            output_dir=output,
+            user=wallet,
+            event_id=1,
+            http_client=http,
+        )
+
+    assert transport.calls == []
+    assert not (output / "coverage" / "ledger.jsonl").exists()
 
 
 def test_shadow_cycle_freezes_input_runs_and_verifies_hash_chain(tmp_path):

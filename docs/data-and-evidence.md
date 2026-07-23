@@ -71,3 +71,5 @@ Bitcoin data is contextual-only in this system. It is not an attribution source,
 ## Source outages and missingness
 
 Partial coverage, disconnects, unavailable sources, absent accounts, missing modalities, and unverifiable raw lineage are first-class facts. They can cause an abstention or a blocked readiness status. They must not be silently zero-filled, treated as no activity, or used to imply a person acted.
+
+Historical enforcement-case research must also preserve the distinction between facts available at the decision cutoff and facts retrieved later. See [Historical wallet case replay](historical-wallet-case-replay.md) for the prospective-versus-forensic contract, legal-audit boundary, and bounded public-wallet examples.

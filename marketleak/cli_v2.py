@@ -137,27 +137,62 @@ def _coverage_for_batch(
     batch: IngestionBatch,
     requested_start: datetime | None,
     requested_end: datetime | None,
-) -> None:
+    filters: Mapping[str, Any] | None = None,
+    resumed_from: str | None = None,
+) -> CoverageRecord:
     times = [record.event_time for record in batch.records]
     now = datetime.now(UTC)
-    start = requested_start or (min(times) if times else now)
-    end = requested_end or (max(times) if times else start)
-    ledger.append(
-        CoverageRecord(
-            platform=platform,
-            dataset=dataset,
-            interval_start=start,
-            interval_end=end,
-            fetched_at=now,
-            record_count=len(batch.records),
-            complete=batch.complete,
-            raw_sha256=tuple(
-                artifact.content_hash.removeprefix("sha256:")
-                for artifact in batch.raw_artifacts
-            ),
-            continuation=batch.continuation,
-        )
+    exact_filters = dict(filters or {})
+    filter_start = exact_filters.get("start")
+    filter_end = exact_filters.get("end")
+    start = requested_start
+    if start is None and isinstance(filter_start, int) and not isinstance(filter_start, bool):
+        start = datetime.fromtimestamp(filter_start, tz=UTC)
+    start = start or (min(times) if times else now)
+    end = requested_end
+    if end is None and isinstance(filter_end, int) and not isinstance(filter_end, bool):
+        end = datetime.fromtimestamp(filter_end, tz=UTC)
+    if end is None:
+        end = max(times) if times else (max(now, start) if exact_filters else start)
+
+    raw_sha256 = tuple(
+        artifact.content_hash.removeprefix("sha256:")
+        for artifact in batch.raw_artifacts
     )
+    record_count = len(batch.records)
+    complete = batch.complete
+    if resumed_from is not None:
+        prior = next(
+            (
+                row
+                for row in reversed(ledger.records(platform=platform, dataset=dataset))
+                if row.continuation == resumed_from and dict(row.filters) == exact_filters
+            ),
+            None,
+        )
+        if prior is None:
+            # A cursor proves where to resume, but not that this output root
+            # contains the earlier deliveries. Never claim interval coverage
+            # without that raw lineage.
+            complete = False
+        else:
+            raw_sha256 = (*prior.raw_sha256, *raw_sha256)
+            record_count += prior.record_count
+
+    record = CoverageRecord(
+        platform=platform,
+        dataset=dataset,
+        interval_start=start,
+        interval_end=end,
+        fetched_at=now,
+        record_count=record_count,
+        complete=complete,
+        raw_sha256=raw_sha256,
+        continuation=batch.continuation,
+        filters=exact_filters,
+    )
+    ledger.append(record)
+    return record
 
 
 def collect_once(
@@ -194,10 +229,15 @@ def collect_once(
 
     if platform in {"all", "polymarket"}:
         connector = PolymarketConnector(http)
-        trades = connector.fetch_trades(
+        exact_filters = connector.resolve_trade_query_filters(
             market=polymarket_market,
             start=start,
             end=end,
+        )
+        trades = connector.fetch_trades(
+            market=polymarket_market,
+            start=start,
+            end=datetime.fromtimestamp(exact_filters["end"], tz=UTC),
             page_size=min(page_size, 10_000),
             max_pages=max_pages,
         )
@@ -210,6 +250,7 @@ def collect_once(
         _coverage_for_batch(
             coverage, platform="polymarket", dataset="public_trades", batch=trades,
             requested_start=start, requested_end=end,
+            filters=exact_filters,
         )
         if polymarket_token:
             book = connector.fetch_orderbook(polymarket_token)
@@ -255,6 +296,111 @@ def collect_once(
         "bounded": {"page_size": page_size, "max_pages": max_pages},
         "sources": summaries,
         "network_was_requested": True,
+        "effectiveness_unknown": True,
+    }
+
+
+def _continuation_state(continuation: str | None) -> str | None:
+    if continuation is None:
+        return None
+    try:
+        payload = json.loads(continuation)
+    except (json.JSONDecodeError, TypeError):
+        return "legacy_offset"
+    if isinstance(payload, Mapping) and isinstance(payload.get("state"), str):
+        return payload["state"]
+    return "unknown"
+
+
+def collect_polymarket_wallet_history(
+    *,
+    output_dir: str | Path,
+    user: str,
+    market: str | None = None,
+    event_id: int | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    continuation: str | None = None,
+    page_size: int = 1000,
+    max_pages: int = 1,
+    taker_only: bool = False,
+    http_client: EvidenceHttpClient | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> dict[str, Any]:
+    """Collect a bounded, resumable public Polymarket wallet-trade history."""
+
+    if market is not None or event_id is not None:
+        raise ValueError(
+            "collect-polymarket-wallet is user-only; collect full wallet history "
+            "and filter market/event scope in the local normalized index"
+        )
+    if not 1 <= max_pages <= 100:
+        raise ValueError("max_pages must be in [1, 100]")
+    if not 1 <= page_size <= PolymarketConnector.MAX_TRADE_LIMIT:
+        raise ValueError("page_size must be in [1, 10000]")
+    root = Path(output_dir)
+    raw_store = RawArtifactStore(root / "raw")
+    http = http_client or EvidenceHttpClient(raw_store)
+    if http.raw_store.root.resolve() != raw_store.root.resolve():
+        raise ValueError("injected HTTP client must use output_dir/raw as its RawArtifactStore")
+
+    connector = PolymarketConnector(http, clock=clock)
+    exact_filters = connector.resolve_trade_query_filters(
+        market=market,
+        event_id=event_id,
+        user=user,
+        start=start,
+        end=end,
+        taker_only=taker_only,
+        continuation=continuation,
+    )
+    frozen_end = datetime.fromtimestamp(exact_filters["end"], tz=UTC)
+    trades = connector.fetch_trades(
+        market=market,
+        event_id=event_id,
+        user=user,
+        start=start,
+        end=frozen_end,
+        taker_only=taker_only,
+        page_size=page_size,
+        max_pages=max_pages,
+        continuation=continuation,
+    )
+    writes = _write_batch(NormalizedStore(root), trades)
+    coverage_record = _coverage_for_batch(
+        CoverageLedger(root / "coverage" / "ledger.jsonl"),
+        platform="polymarket",
+        dataset="public_wallet_trades",
+        batch=trades,
+        requested_start=start,
+        requested_end=end,
+        filters=exact_filters,
+        resumed_from=continuation,
+    )
+    continuation_state = _continuation_state(trades.continuation)
+    return {
+        "command": "collect-polymarket-wallet",
+        "output_dir": str(root),
+        "wallet": exact_filters["user"],
+        "query_filters": exact_filters,
+        "bounded": {"page_size": page_size, "max_pages": max_pages},
+        "records": len(trades.records),
+        "complete": coverage_record.complete,
+        "continuation": trades.continuation,
+        "continuation_state": continuation_state,
+        "requires_narrower_time_window": continuation_state == "split_required",
+        "writes": writes,
+        "coverage": {
+            "dataset": coverage_record.dataset,
+            "complete": coverage_record.complete,
+            "record_count": coverage_record.record_count,
+            "filters": dict(coverage_record.filters),
+            "raw_sha256": list(coverage_record.raw_sha256),
+        },
+        "network_was_requested": True,
+        "pseudonymous_wallet_only": True,
+        "not_identity_attribution": True,
+        "not_proof_of_fraud": True,
         "effectiveness_unknown": True,
     }
 
@@ -684,6 +830,23 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--page-size", type=int, default=100)
     collect.add_argument("--max-pages", type=int, choices=range(1, 101), default=1)
 
+    wallet = commands.add_parser(
+        "collect-polymarket-wallet",
+        help="Collect a bounded, resumable public Polymarket wallet-trade history",
+    )
+    wallet.add_argument("--output-dir", default="data/v2")
+    wallet.add_argument("--user", required=True, help="Public Polymarket profile wallet address")
+    wallet.add_argument("--start", help="Inclusive ISO-8601 UTC lower bound; defaults to full user history")
+    wallet.add_argument("--end", help="Inclusive ISO-8601 UTC upper bound")
+    wallet.add_argument("--continuation", help="Opaque continuation returned by a previous invocation")
+    wallet.add_argument("--page-size", type=int, default=1000)
+    wallet.add_argument("--max-pages", type=int, choices=range(1, 101), default=1)
+    wallet.add_argument(
+        "--taker-only",
+        action="store_true",
+        help="Request taker-side records only; by default both maker and taker roles are collected",
+    )
+
     evidence = commands.add_parser(
         "collect-evidence-once",
         help="Run bounded point-in-time collection from an explicit source config",
@@ -769,6 +932,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             end=_datetime(args.end) if args.end else None,
             page_size=args.page_size,
             max_pages=args.max_pages,
+        )
+    elif args.command == "collect-polymarket-wallet":
+        payload = collect_polymarket_wallet_history(
+            output_dir=args.output_dir,
+            user=args.user,
+            start=_datetime(args.start) if args.start else None,
+            end=_datetime(args.end) if args.end else None,
+            continuation=args.continuation,
+            page_size=args.page_size,
+            max_pages=args.max_pages,
+            taker_only=args.taker_only,
         )
     elif args.command == "collect-evidence-once":
         payload = collect_evidence_once(

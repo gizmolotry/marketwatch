@@ -1,0 +1,9 @@
+{
+  "include_globs": ["**/*"],
+  "exclude_globs": [".cartographer/**", ".git/**", ".pytest_cache/**", "pytest-*/**", "ui/node_modules/**"],
+  "artifact_extensions": [".faiss", ".joblib", ".onnx", ".pkl", ".pt", ".pth"],
+  "max_file_bytes": 10000000,
+  "include_untracked": true,
+  "include_ignored": false,
+  "sensitive_globs": [".env", ".env.*", "**/*secret*", "**/*token*"]
+}

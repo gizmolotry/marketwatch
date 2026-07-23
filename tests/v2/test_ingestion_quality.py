@@ -1,4 +1,7 @@
+import json
 from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from marketleak.ingestion.coverage import CoverageLedger, CoverageRecord
 from marketleak.ingestion.quality import DataQualityGate, DataQualityReport
@@ -64,3 +67,21 @@ def test_coverage_ledger_only_counts_explicitly_complete_intervals(tmp_path):
 
     assert gaps == [(start + timedelta(hours=1), start + timedelta(hours=3))]
     assert len(ledger.records(platform="kalshi", dataset="public_trades")) == 2
+
+
+@pytest.mark.parametrize("invalid_complete", ["false", "true", 0, 1, None])
+def test_coverage_ledger_rejects_non_boolean_complete_values(tmp_path, invalid_complete):
+    path = tmp_path / "coverage.jsonl"
+    item = {
+        "platform": "polymarket",
+        "dataset": "public_trades",
+        "interval_start": "2026-01-01T00:00:00Z",
+        "interval_end": "2026-01-01T01:00:00Z",
+        "fetched_at": "2026-01-01T01:00:01Z",
+        "record_count": 0,
+        "complete": invalid_complete,
+    }
+    path.write_text(json.dumps(item) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="JSON boolean"):
+        CoverageLedger(path).records()

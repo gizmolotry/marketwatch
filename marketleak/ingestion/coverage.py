@@ -52,6 +52,8 @@ class CoverageRecord:
             raise ValueError("interval_end must be >= interval_start")
         if self.record_count < 0:
             raise ValueError("record_count must be non-negative")
+        if type(self.complete) is not bool:
+            raise ValueError("complete must be a real boolean")
         object.__setattr__(self, "platform", require_text(self.platform, "platform").lower())
         object.__setattr__(self, "dataset", require_text(self.dataset, "dataset"))
         object.__setattr__(self, "interval_start", start)
@@ -84,6 +86,9 @@ class CoverageLedger:
             if not raw_line.strip():
                 continue
             item = json.loads(raw_line)
+            complete = item["complete"]
+            if type(complete) is not bool:
+                raise ValueError("coverage complete must be a JSON boolean")
             row = CoverageRecord(
                 platform=item["platform"],
                 dataset=item["dataset"],
@@ -91,7 +96,7 @@ class CoverageLedger:
                 interval_end=utc_datetime(item["interval_end"]),
                 fetched_at=utc_datetime(item["fetched_at"]),
                 record_count=int(item["record_count"]),
-                complete=bool(item["complete"]),
+                complete=complete,
                 raw_sha256=tuple(item.get("raw_sha256", ())),
                 continuation=item.get("continuation"),
                 filters=item.get("filters", {}),
@@ -131,4 +136,3 @@ class CoverageLedger:
         if cursor < desired_end:
             gaps.append((cursor, desired_end))
         return gaps
-

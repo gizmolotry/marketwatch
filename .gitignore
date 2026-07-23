@@ -12,6 +12,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.cartographer/
 pytest-tmp*/
 tmp/
 
@@ -39,6 +40,21 @@ datasets/*
 datasets/labels/*
 !datasets/labels/manifest_v1.json
 !datasets/labels/public_cases_v1.jsonl
+!datasets/wallet-cases/
+datasets/wallet-cases/*
+!datasets/wallet-cases/van-dyke-burdensome-mix/
+datasets/wallet-cases/van-dyke-burdensome-mix/*
+!datasets/wallet-cases/van-dyke-burdensome-mix/case.json
+!datasets/wallet-cases/van-dyke-burdensome-mix/fills.jsonl
+!datasets/wallet-cases/van-dyke-burdensome-mix/manifest.json
+!datasets/wallet-cases/van-dyke-burdensome-mix/checksums.sha256
+!datasets/wallet-cases/van-dyke-burdensome-mix/replay-report.json
+!datasets/wallet-cases/van-dyke-burdensome-mix/cohort-replay-report.json
+!datasets/wallet-cases/van-dyke-burdensome-mix/coverage/
+datasets/wallet-cases/van-dyke-burdensome-mix/coverage/*
+!datasets/wallet-cases/van-dyke-burdensome-mix/coverage/ledger.jsonl
+!datasets/wallet-cases/van-dyke-burdensome-mix/raw/
+!datasets/wallet-cases/van-dyke-burdensome-mix/raw/**
 
 # Generated legacy evidence and derived artifacts; retain fixture parquet files.
 demo_data/raw_evidence/
