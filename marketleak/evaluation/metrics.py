@@ -11,7 +11,7 @@ from typing import Iterable
 
 from marketleak.labels.schemas import LabelTarget, LabelValue
 
-from .schemas import EvaluationRow
+from .schemas import EvaluationRow, unique_evaluation_rows
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,7 +22,7 @@ class CalibrationGate:
     ece_bins: int = 10
 
     def reasons(self, rows: Iterable[EvaluationRow]) -> tuple[str, ...]:
-        binary = [row for row in rows if row.label.is_binary]
+        binary = [row for row in unique_evaluation_rows(rows) if row.label.is_binary]
         positives = sum(row.label == LabelValue.POSITIVE for row in binary)
         negatives = sum(row.label == LabelValue.NEGATIVE for row in binary)
         reasons: list[str] = []
@@ -181,7 +181,7 @@ def evaluate(
 ) -> EvaluationReport:
     if analyst_capacity < 0:
         raise ValueError("analyst_capacity must be non-negative")
-    selected = [row for row in rows if row.target == target]
+    selected = [row for row in unique_evaluation_rows(rows) if row.target == target]
     binary = [row for row in selected if row.label.is_binary]
     positives = [row for row in binary if row.label == LabelValue.POSITIVE]
     negatives = [row for row in binary if row.label == LabelValue.NEGATIVE]

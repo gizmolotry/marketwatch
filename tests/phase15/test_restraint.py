@@ -12,6 +12,8 @@ from marketleak.multimodal.evaluation import (
 )
 from marketleak.multimodal.fusion import DeterministicLateFusion, ModalityEvidence
 from marketleak.multimodal.uncertainty import (
+    AbstentionDecision,
+    AdaptiveFeedbackThresholdController,
     ConformalFeedback,
     QueueCandidate,
     ReferenceOODScorer,
@@ -64,8 +66,24 @@ def test_selective_policy_abstains_for_missing_modalities() -> None:
     assert "insufficient_modalities" in decision.reasons
 
 
-def test_conformal_controller_excludes_future_feedback() -> None:
-    controller = RollingConformalRiskController(min_feedback=2, window_size=10)
+def test_disjoint_mechanism_support_is_maximal_disagreement_and_abstains() -> None:
+    # Minimal fixture for sparse-map mechanics; it is not effectiveness evidence.
+    fusion = DeterministicLateFusion(expected_modalities=("market", "public_source")).fuse(
+        [
+            ModalityEvidence("market", NOW, 1.0, {"mechanism_x": 1.0}),
+            ModalityEvidence("public_source", NOW, 1.0, {"mechanism_y": 1.0}),
+        ],
+        as_of=NOW,
+    )
+    ood = ReferenceOODScorer(k_neighbors=1, min_reference=3).fit([[0.0], [0.1], [0.2]]).score([0.1])
+
+    assert fusion.disagreement == pytest.approx(1.0)
+    decision = SelectiveAbstentionPolicy(max_disagreement=0.40).decide(fusion, ood)
+    assert "cross_modality_disagreement" in decision.reasons
+
+
+def test_adaptive_controller_excludes_future_feedback() -> None:
+    controller = AdaptiveFeedbackThresholdController(min_feedback=2, window_size=10)
     controller.record(
         ConformalFeedback(NOW - timedelta(hours=2), NOW - timedelta(hours=1), 0.8, True, "old-supported")
     )
@@ -74,7 +92,7 @@ def test_conformal_controller_excludes_future_feedback() -> None:
     )
     threshold, reason = controller.threshold(as_of=NOW)
     assert threshold is None
-    assert reason == "conformal_history_unavailable"
+    assert reason == "adaptive_feedback_history_unavailable"
 
     threshold, reason = controller.threshold(as_of=NOW + timedelta(hours=2))
     assert reason is None
@@ -85,6 +103,36 @@ def test_conformal_controller_excludes_future_feedback() -> None:
         analyst_daily_budget=1,
     )
     assert len(decision) == 1
+
+
+def test_adaptive_feedback_is_idempotent_and_conflicts_fail_closed() -> None:
+    controller = AdaptiveFeedbackThresholdController(min_feedback=1)
+    feedback = ConformalFeedback(NOW - timedelta(hours=2), NOW - timedelta(hours=1), 0.8, True, "same")
+    controller.record(feedback)
+    controller.record(feedback)
+    assert controller.available_feedback(as_of=NOW) == (feedback,)
+
+    with pytest.raises(ValueError, match="conflicting feedback"):
+        controller.record(
+            ConformalFeedback(NOW - timedelta(hours=2), NOW - timedelta(minutes=30), 0.8, False, "same")
+        )
+
+
+def test_adaptive_threshold_is_strict_and_legacy_name_is_deprecated() -> None:
+    controller = AdaptiveFeedbackThresholdController(min_feedback=2)
+    controller.record(ConformalFeedback(NOW - timedelta(hours=3), NOW - timedelta(hours=2), 0.7, False, "a"))
+    controller.record(ConformalFeedback(NOW - timedelta(hours=2), NOW - timedelta(hours=1), 0.9, True, "b"))
+    threshold, reason = controller.threshold(as_of=NOW)
+    assert reason is None
+    assert threshold == pytest.approx(0.7)
+
+    neutral = AbstentionDecision(False, (), "mechanism_x", 0.7, 0.0)
+    routed = controller.route([QueueCandidate("candidate", 0.7, neutral)], as_of=NOW, analyst_daily_budget=1)
+    assert routed[0].escalate is False
+    assert routed[0].reasons == ("at_or_below_adaptive_threshold",)
+
+    with pytest.warns(DeprecationWarning, match="adaptive heuristic"):
+        RollingConformalRiskController(min_feedback=1)
 
 
 def test_calibration_metrics_withhold_brier_and_ece_without_labels() -> None:

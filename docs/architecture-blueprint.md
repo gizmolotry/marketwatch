@@ -27,16 +27,18 @@ The permitted claims are deliberately narrower than the long-term research ambit
 |---|---|---|
 | Raw capture | Content-addressed raw objects, retrieval receipts, quarantine, source coverage, canonical market records | Continuous multi-source capture with source-specific gap recovery, immutable lake partitions, and complete coverage ledgers |
 | Event memory | Typed point-in-time facts for market state, public evidence, and Polygon settlement; separate market-context and reference contracts | A unified but typed event store covering all governed modalities without erasing their source-specific semantics |
-| Market features | Closed five-minute price, fill, and top-of-book snapshots with lineage and missingness | Multi-horizon sequence features, full depth dynamics, signed flow, impact, reversal, volatility, cancel/order-lifetime features, and sibling controls |
+| Market features | Closed five-minute kind-specific last-trade/midpoint/bid/ask series; fill and independently masked top-of-book values; synchronized-pair derivations; lineage and explicit missingness | Multi-horizon sequence features, full depth dynamics, signed flow, impact, reversal, volatility, cancel/order-lifetime features, and sibling controls |
 | Actor features | Public actor aggregation over canonical fills: counts, notional, concentration, positions, and resolved performance | Longitudinal pseudonymous actor sequences, novelty, burstiness, funding/settlement graph motifs, peer baselines, and explicit visibility masks |
 | Context/reference | Raw-lineaged contract context and fail-closed documented BTC reference support | Contract-specific reference adapters, scheduled-event and sibling graphs, and residualized market movement for every supported market family |
 | Public information | Raw archive, first-seen timing, claim normalization, matching, coverage, and explanation support | Primary-source roster, entity/event graph, semantic novelty, cross-source corroboration, and time-aware document sequence encoder |
 | On-chain | Strict Polygon `OrderFilled` parsing/corroboration and bounded explicit Bitcoin watch-context collection | Continuous Polygon backfill plus temporal graph features; Bitcoin remains contextual and requires an independently documented link |
 | SEC/cases | No SEC Form 3/4/5 collector or normalized enforcement-case corpus in the Phase 15 model | Bulk and incremental SEC ingestion, issuer/event mapping, normal insider-sequence pretraining, and separately governed enforcement case graphs |
-| Fusion | Reliability × freshness deterministic late fusion and disagreement; three-modality experimental neural forward architecture | Masked specialist encoders, shared/private representations, quality-aware late fusion, calibrated task heads, and cross-domain transfer |
+| Fusion | Reliability × freshness deterministic late fusion and bounded Jensen-Shannon cross-modal disagreement; three-modality experimental neural forward architecture | Masked specialist encoders, shared/private representations, quality-aware late fusion, calibrated task heads, and cross-domain transfer |
 | Retrieval | Separate exact `faiss.IndexFlatIP` modality indexes with causal/provenance filters and structured reranking | Case-, event-, and modality-level retrieval; ANN only after exact-search promotion gates pass |
-| Restraint | kNN distance, energy-like OOD, modality/disagreement/weak-support abstention, calibration checks, rolling conformal-style routing | Validated OOD reference populations, adaptive conformal risk control by slice, drift monitoring, and explicit human capacity constraints |
+| Restraint | kNN distance, energy-like OOD, modality/disagreement/weak-support abstention, fail-closed calibration, and a non-conformal adaptive feedback queue heuristic | Validated OOD reference populations, statistically justified conformal risk control by slice, drift monitoring, and explicit human capacity constraints |
 | Serving | Immutable manifest verification and read-only v3 metadata/frozen-assessment endpoints | A shadow-only online scorer first; later a bundle-gated inference service feeding an analyst queue, with explanations derived from evidence packets |
+
+The orchestration layer currently has one narrower numeric admission contract in addition to the general five-minute feature snapshot: orchestration v5 uses immutable, canonically hashed `NaiveBaselineFeatureSpec` recomputation for `naive_price_change` and `naive_volume`. Feature scope is exact market plus outcome and one exact, fully covered, contiguous, non-overlapping 300-second window ending at a terminal primary market slice. Only those market slices and identified, exact-scope actor facts inside the window and available by market-feature availability may enter row lineage. It is not the target specialist-feature pipeline. Current wallet cohort/replay output semantics are documented separately in [historical-wallet-case-replay.md](historical-wallet-case-replay.md): peer-relative signal strength, statistical support, population coverage status, and coverage confidence remain distinct and are not probabilities.
 
 ## 3. Units of data, analysis, and adjudication
 
@@ -134,8 +136,8 @@ The following table separates fields that are implemented in repository contract
 
 | Modality | Current raw/canonical variables | Current derived variables | Planned variables |
 |---|---|---|---|
-| Market price and trades | Market/outcome IDs, event/ingest times, price; explicit fill price, size, side, actor visibility/UID where the venue exposes it; source/raw lineage | `price_observation_count`, `fill_count`, `price_open`, `price_close`, `price_change`, `trade_notional`, `mean_fill_size` | Log returns at 1/5/15/60-minute horizons; realized volatility; acceleration; reversal; signed notional; buy/sell imbalance; trade intensity; interarrival statistics; max/median/quantile size; size relative to market and actor history; VWAP deviation; price impact and recovery |
-| Order book and transport | Timestamped snapshots/deltas, bid/ask levels, source sequence/lifecycle data when exposed, receive times, reconnect/coverage state | `orderbook_snapshot_count`, `best_bid`, `best_ask`, `quoted_spread`, `bid_depth`, `ask_depth`, `depth_imbalance` | Depth at fixed price bands; microprice; book slope/convexity; replenishment and depletion; cancel/add/execute rates; order lifetime where observable; sequence gaps; stale-book age; impact-adjusted move; spoofing-like patterns only as descriptive microstructure motifs |
+| Market price and trades | Market/outcome IDs, event/ingest times, observation kind, price; explicit fill price, size, side, actor visibility/UID where the venue exposes it; source/raw lineage | Kind-specific `last_trade_series`, `midpoint_series`, `best_bid_series`, `best_ask_series`; compatibility `price_open`/`price_close`/`price_change` alias last trade only; fill count/notional/mean size | Log returns at 1/5/15/60-minute horizons; realized volatility; acceleration; reversal; signed notional; buy/sell imbalance; trade intensity; interarrival statistics; max/median/quantile size; size relative to market and actor history; VWAP deviation; price impact and recovery |
+| Order book and transport | Timestamped snapshots/deltas, bid/ask levels, source sequence/lifecycle data when exposed, receive times, reconnect/coverage state | Independent bid/ask and depth observed masks; synchronized-only `quoted_spread`, derived midpoint, and `depth_imbalance`; explicit missing reasons | Depth at fixed price bands; microprice; book slope/convexity; replenishment and depletion; cancel/add/execute rates; order lifetime where observable; sequence gaps; stale-book age; impact-adjusted move; spoofing-like patterns only as descriptive microstructure motifs |
 | Market and event context | Question, category, outcomes, explicit siblings and relationship, scheduled events and state, open/close/resolution/deadline times, resolution-rule URL | Point-in-time admission and explicit context availability | Time to close/resolution; scheduled-event proximity; category/event embeddings; sibling return vector; mutually exclusive probability-sum residual; rule ambiguity features; venue/market-age priors |
 | Underlying/reference | Per-market documented mapping, rule URL, primary-source URL/status, asset/quote, observation kind, raw price, candle timing/finality, all availability clocks | Fail-closed admission status; current narrow BTC ticker/candle support | Reference returns and volatility at matched horizons; lagged cross-correlation; beta/residual market move; distance to strike/threshold; settlement-boundary proximity; reference-source disagreement only when contractually relevant |
 | Public information | URL, document and claim IDs/hashes, text, entity IDs, claimed publication, first-seen/retrieval/modified times, source reliability and coverage | Claim normalization/matching and public-explanation support outside the numeric neural vector | Source roster coverage; relevance; novelty versus prior documents; entity/event links; publication-to-market lag; claim contradiction/agreement; scheduled versus surprise status; text embedding; evidence chronology embedding; first-observed coverage mask |
@@ -144,7 +146,7 @@ The following table separates fields that are implemented in repository contract
 | Bitcoin context | Explicit watch registration; address summary transaction/funded/spent counts and sums; UTXOs; transaction state, size, weight, fee, block; endpoint coverage | Bounded raw-lineaged context snapshot; deliberately no risk score or Polymarket attribution | Only contextual timing/flow aggregates after an independently documented market link; never automatic Bitcoin↔Polygon linking, identity inference, settlement substitution, or generic wallet clustering |
 | SEC Forms 3/4/5 | **Not implemented.** Target raw fields: accession/acceptance/filing metadata, issuer CIK/ticker, reporting-person CIK, role/title/relationship, transaction date/code, shares, price/value, holdings, direct/indirect ownership, derivative fields, footnotes, amendment and 10b5-1 indicator where present | None | Public-observability chronology; open-market `P`/`S` sequences; actor/issuer historical baselines; role and plan context; issuer-event proximity; disclosed sequence embeddings; filing novelty and amendments. Grants, gifts, derivatives, and amendments remain separate transaction families |
 | Enforcement and case graph | **Not implemented as a normalized target corpus.** Public complaint/order/judgment documents may enter the ordinary evidence archive | Optional external legal audit exists but is not training eligible | Authority, procedural status, actor/account or pseudonymous wallet, issuer/market/instrument, information event, access window, trade window/direction/size, disclosure, profit/avoided loss, source URLs, mapping grade, independent-case cluster, supersession/outcome history |
-| Quality and provenance | Source UID/class/reliability, content hash, raw artifact UID, parser version, event/first-seen/retrieved/ingested clocks, coverage, source high-watermarks, missingness | Freshness, reliability weighting, explicit modality masks, readiness reason codes | Gap duration/count, sequence continuity, parser drift, feature age, source disagreement, mapping confidence, case-mapping grade, per-feature availability mask, observation-density and history sufficiency |
+| Quality and provenance | Source UID/class/reliability, content hash, raw artifact UID, parser version, event/first-seen/retrieved/ingested clocks, coverage, source high-watermarks, missingness | Exact identity/snapshot/cutoff and 300-second window binding; contiguous non-overlap validation; actor temporal admission; recomputation; source/raw UIDs; immutable spec; complete accepted and rejected payload hashing; run UID; duplicate rejection; freshness, masks, readiness reasons | Gap duration/count, sequence continuity, parser drift, feature age, source disagreement, mapping confidence, case-mapping grade, observation-density and history sufficiency |
 
 The exact implemented five-minute numeric market feature contract is in [features.py](../marketleak/multimodal/features.py). Planned variables must receive versioned feature definitions, causal tests, and lineage references before entering a model.
 
@@ -189,7 +191,7 @@ Initial specialist choices should be deliberately modest:
 - Transformer or recurrent sequence baseline for SEC ownership transactions;
 - masked gated late fusion before considering cross-modal attention.
 
-The current [neural.py](../marketleak/multimodal/neural.py) is a smaller experimental shell: three private MLP encoders (`market`, `evidence`, `onchain`), private-to-shared projections, Boolean modality masks, concatenative late fusion, and mechanism/evidence heads. It has no default weights, training loop, or approved serving bundle. The target architecture must first beat simpler late-fusion baselines.
+The current [neural.py](../marketleak/multimodal/neural.py) is a smaller experimental shell: three private MLP encoders (`market`, `evidence`, `onchain`), private-to-shared projections, Boolean modality masks, concatenative late fusion, and mechanism/evidence heads. It has no default weights, training loop, or cryptographically bound independently approved serving object. Protected execution is deliberately impossible today: a Boolean, manifest, or arbitrary caller object cannot unlock it. The target architecture must first beat simpler late-fusion baselines.
 
 ## 8. Learning objectives — proposed and not implemented
 
@@ -301,9 +303,9 @@ The model may output a mechanism, `unknown`, `unmapped`, `insufficient_evidence`
 - insufficient OOD reference data or excessive OOD score;
 - unavailable case or context mapping.
 
-### 11.4 Adaptive conformal-style operational control
+### 11.4 Current adaptive feedback heuristic and target conformal control
 
-The current rolling controller uses analyst feedback available by the decision cutoff, withholds escalation when feedback is insufficient, adjusts a conservative threshold using unsupported escalations, and caps the daily analyst queue. “Supported” means the escalation was useful to the analyst workflow—not that fraud occurred. Target promotion requires a statistically justified conformal risk-control method with finite-sample assumptions documented for each deployment slice.
+The current `AdaptiveFeedbackThresholdController` uses analyst feedback available by the decision cutoff, withholds escalation when feedback is insufficient, adjusts an empirical threshold using unsupported escalations, requires a score strictly above the threshold, and caps the daily analyst queue. “Supported” means the escalation was useful to the analyst workflow—not that fraud occurred. It is not conformal and makes no coverage or finite-sample risk-control guarantee. The old `RollingConformalRiskController` name is deprecated compatibility surface. Target promotion requires a statistically justified conformal risk-control method with finite-sample assumptions documented for each deployment slice.
 
 ## 12. Evaluation design and promotion gates
 
@@ -319,18 +321,18 @@ AUROC may be reported as a ranking diagnostic, but it is insufficient for a rare
 - OOD detection and drift behavior by slice;
 - exact-retrieval Recall@K and temporal/provenance violation count.
 
-All partitions must be forward-time and disjoint by event cluster, market, actor/wallet, and—where applicable—issuer. Closely related contracts from one enforcement episode stay in one partition. Evaluation includes unseen venues/market families, missing-modality stress, source outages, thin/deep liquidity regimes, and chronology placebos.
+All partitions must be forward-time and disjoint by event cluster, market, actor/wallet, and—where applicable—issuer. Current actor grouping is admitted only when a source fact carries the pseudonymous actor UID; callers cannot inject actor groups through feature metadata. Any group spanning temporal boundaries is dropped rather than leaked. Closely related contracts from one enforcement episode stay in one partition. Separately predeclared minimum labeled, positive, and negative counts must pass in both validation and untouched test partitions before evaluation. These are engineering sufficiency gates, not proof that the sample is scientifically adequate. Evaluation includes unseen venues/market families, missing-modality stress, source outages, thin/deep liquidity regimes, and chronology placebos.
 
 ### Required gates
 
 | Gate | Acceptance condition |
 |---|---|
-| Data integrity | Every model input links to an admitted as-of fact and raw receipt; no future event, retrieval, filing, or outcome leaks backward |
+| Data integrity | Current naive-baseline identity, fixed window, values, and clocks are recomputed from complete contiguous exact-scope facts; actor sources obey the same window/availability boundary; canonical hashes bind complete accepted rows and full rejected inputs plus schema/cutoff/snapshot/spec identities; no future event, feature clock, retrieval, filing, or outcome leaks backward |
 | Coverage | Required sources have complete declared coverage, or the candidate abstains with the exact limitation |
 | Label governance | Human mechanism/evidence labels are training eligible; unknown/unmapped excluded; case outcome tier and mapping grade preserved separately |
 | Split integrity | Automated checks show no event/market/actor/issuer cluster crosses partitions |
 | Baseline superiority | Proposed model beats preregistered deterministic/logistic/gradient-boosted late-fusion baselines on primary metrics and important slices |
-| Calibration | Minimum class counts pass; Brier/ECE and reliability diagrams meet the frozen plan |
+| Calibration | Minimum validation and test class counts over unique row UIDs pass; all-zero calibrated support is unavailable; Brier/ECE and reliability diagrams meet the frozen plan |
 | Selective risk | Risk decreases as abstention increases; false escalations remain within the analyst-day budget |
 | OOD | Known shifts and held-out families are detected without intolerable in-distribution abstention |
 | Retrieval | Exact-search Recall@K and zero temporal/provenance violations pass; ANN separately matches the exact benchmark before promotion |
@@ -359,7 +361,7 @@ flowchart LR
   OFF --> BUN
 ```
 
-Training and bundle creation remain offline. Online components may load only an explicitly approved immutable bundle whose manifest binds dataset, feature specification, model, calibration, OOD, conformal, retrieval, and code hashes. Secrets stay in server-side collectors. LLMs, if used, operate downstream for entity resolution, claim extraction, chronology formatting, or evidence completeness audits; they neither calculate graph facts nor produce the governed probability or final disposition.
+Training and bundle creation remain offline. Online components may eventually load only a cryptographically bound, independently approved immutable bundle whose manifest binds dataset, feature specification, model, calibration, OOD, conformal, retrieval, and code hashes to the executed model state. No such approval object or protected neural execution path exists today. Secrets stay in server-side collectors. LLMs, if used, operate downstream for entity resolution, claim extraction, chronology formatting, or evidence completeness audits; they neither calculate graph facts nor produce the governed probability or final disposition.
 
 The existing [serving.py](../marketleak/multimodal/serving.py) and bundle contracts in [bundles.py](../marketleak/multimodal/bundles.py) deliberately expose verified metadata and frozen assessments without loading model bytes or running live inference. The deployment path is:
 
@@ -388,11 +390,11 @@ The existing [serving.py](../marketleak/multimodal/serving.py) and bundle contra
 
 **Acceptance:** preregistered collection windows produce raw hashes, receipts, normalized rows, watermarks, and honest complete/partial/unavailable coverage reports; replay is deterministic.
 
-### Phase C — build versioned multi-horizon features
+### Phase C — extend the implemented causal feature foundation to multiple horizons
 
 - Add market flow, depth dynamics, impact/reversal, quality, context, sibling, and reference residual features.
 - Add actor longitudinal features with explicit visibility/history masks.
-- Attach every feature to exact source fact UIDs and a feature-spec hash.
+- Extend the implemented naive-baseline recomputation and exact snapshot/cutoff, source-fact/raw-artifact, and feature-spec bindings with separately versioned derivations for every new feature.
 
 **Acceptance:** causal feature tests reject post-cutoff inputs; golden replays are byte-stable; missing modalities differ from observed zeros.
 
@@ -419,7 +421,7 @@ The existing [serving.py](../marketleak/multimodal/serving.py) and bundle contra
 - Establish source, market-family, liquidity, missingness, and temporal slices.
 - Freeze the first prospective evaluation plan and analyst budget.
 
-**Acceptance:** readiness gates pass; calibration is available only at sufficient counts; shadow queue metrics beat naive price-z-score and volume-only baselines.
+**Acceptance:** readiness gates pass; calibration is available only at sufficient counts and non-degenerate calibrated support; shadow queue metrics beat naive price-z-score and volume-only baselines.
 
 ### Phase G — introduce retrieval and neural representations
 
@@ -433,7 +435,7 @@ The existing [serving.py](../marketleak/multimodal/serving.py) and bundle contra
 
 - Fit OOD reference populations without test leakage.
 - Validate abstention curves, source-outage behavior, and modality disagreement.
-- Run rolling conformal-style routing under fixed daily analyst budgets.
+- Replace the current adaptive feedback heuristic with a statistically justified conformal-risk method under fixed daily analyst budgets.
 
 **Acceptance:** false escalations per analyst-day remain within the declared bound; insufficient history causes abstention; selective risk improves with abstention across required slices.
 

@@ -415,7 +415,12 @@ def test_hindsight_reconstruction_uses_explicit_later_availability_and_never_bec
     assert existence_bound.status == "available"
     assert existence_bound.policy.focus_published_at is None
     assert existence_bound.rows[0].signal_classification in {"high", "elevated", "routine"}
-    assert existence_bound.to_payload()["signal_assessment"]["confidence"] == "high"
+    assessment = existence_bound.to_payload()["signal_assessment"]
+    assert "confidence" not in assessment
+    assert assessment["signal_strength"] == existence_bound.rows[0].signal_classification
+    assert assessment["statistical_support"] == "sufficient"
+    assert assessment["coverage_status"] == "complete"
+    assert assessment["coverage_confidence"] == "verified_complete"
 
     operational_missing_publication = rank_wallet_cohort(
         coverage=coverage(len(basic_fills())),
@@ -733,6 +738,112 @@ def test_all_identical_wallet_scores_share_population_rank_one() -> None:
     assert {row.population_rank for row in report.rows} == {1}
     assert {row.statistical_rank for row in report.rows} == {1}
     assert {row.signal_classification for row in report.rows} == {"routine"}
+
+
+def test_signal_assessment_serializes_routine_elevated_abstain_and_unavailable_coherently() -> None:
+    """Mechanics fixtures verify output semantics, not signal effectiveness."""
+
+    actors = ACTORS[:3]
+    observed = START + timedelta(minutes=5)
+    identical = tuple(fill(actor, index, size="10", event_time=observed) for index, actor in enumerate(actors))
+    routine_report = rank_wallet_cohort(
+        coverage=coverage(len(identical)),
+        policy=policy(),
+        fills=identical,
+        candidate_actor_uids=(actors[0],),
+        nuisance_vectors=nuisance(actors),
+    ).to_payload()
+    routine = routine_report["signal_assessment"]
+    assert routine == {
+        "status": "available",
+        "classification": "routine",
+        "review_priority": "routine",
+        "signal_strength": "routine",
+        "statistical_support": "sufficient",
+        "coverage_status": "complete",
+        "coverage_confidence": "verified_complete",
+        "population_rank": 1,
+        "population_size": 3,
+        "summary": "Routine peer-relative signal strength with sufficient statistical support in the declared cohort.",
+        "decision_owner": "human_reviewer",
+    }
+    routine_row = routine_report["rows"][0]
+    assert routine_row["signal_classification"] == "routine"
+    assert routine_row["review_priority"] == "routine"
+    assert routine_row["signal_strength"] == "routine"
+    assert routine_row["statistical_support"] == "sufficient"
+
+    items = basic_fills()
+    elevated = rank_wallet_cohort(
+        coverage=coverage(len(items)),
+        policy=policy(
+            elevated_signal_percentile_min=Decimal("0.80"),
+            high_signal_percentile_min=Decimal("0.90"),
+        ),
+        fills=items,
+        candidate_actor_uids=(ACTORS[-1],),
+        nuisance_vectors=nuisance(),
+    ).to_payload()["signal_assessment"]
+    assert elevated["classification"] == "elevated"
+    assert elevated["review_priority"] == "elevated"
+    assert elevated["signal_strength"] == "elevated"
+    assert elevated["summary"].startswith("Elevated peer-relative signal strength")
+    assert "confidence" not in elevated
+
+    abstained_report = rank_wallet_cohort(
+        coverage=coverage(len(items), retrieved_at=AS_OF + timedelta(minutes=1)),
+        policy=policy(),
+        fills=items,
+        candidate_actor_uids=(ACTORS[0],),
+        nuisance_vectors=nuisance(),
+    )
+    abstained = abstained_report.to_payload()["signal_assessment"]
+    assert abstained["status"] == "abstain"
+    assert abstained["classification"] == "unavailable"
+    assert abstained["review_priority"] == "unavailable"
+    assert abstained["signal_strength"] == "unavailable"
+    assert abstained["statistical_support"] == "insufficient"
+    # The population capture is complete even though it arrived too late for
+    # this operational calculation; those facts must remain separate.
+    assert abstained["coverage_status"] == "complete"
+    assert abstained["coverage_confidence"] == "verified_complete"
+
+    for missing_status in (CoverageStatus.UNKNOWN, CoverageStatus.UNAVAILABLE):
+        unavailable = cohort_module.WalletSignalAssessment.derive_values(
+            report_status="abstain",
+            row_status=None,
+            signal_classification="insufficient_data",
+            coverage_status=missing_status,
+            population_rank=1,
+            population_size=100,
+        ).to_payload()
+        assert unavailable["status"] == "unavailable"
+        assert unavailable["classification"] == "unavailable"
+        assert unavailable["review_priority"] == "unavailable"
+        assert unavailable["signal_strength"] == "unavailable"
+        assert unavailable["statistical_support"] == "unavailable"
+        assert unavailable["coverage_status"] == missing_status.value
+        assert unavailable["coverage_confidence"] == missing_status.value
+        assert unavailable["population_rank"] is None
+        assert unavailable["population_size"] is None
+
+    partial = cohort_module.WalletSignalAssessment.derive_values(
+        report_status="available",
+        row_status="available",
+        signal_classification="high",
+        coverage_status=CoverageStatus.PARTIAL,
+        population_rank=1,
+        population_size=100,
+    ).to_payload()
+    assert partial["status"] == "abstain"
+    assert partial["classification"] == "unavailable"
+    assert partial["review_priority"] == "unavailable"
+    assert partial["signal_strength"] == "unavailable"
+    assert partial["statistical_support"] == "unavailable"
+    assert partial["coverage_status"] == "partial"
+    assert partial["coverage_confidence"] == "limited"
+    assert partial["population_rank"] is None
+    assert partial["population_size"] is None
 
 
 def test_ten_thousand_wallet_population_uses_one_profile_and_finishes_bounded(monkeypatch: pytest.MonkeyPatch) -> None:

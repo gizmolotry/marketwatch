@@ -14,7 +14,7 @@ flowchart LR
   H["Human multi-axis adjudication"] --> B["Baseline readiness/evaluation"]
   E --> F["Specialist features and late fusion"]
   E --> X["Exact per-modality retrieval"]
-  F --> U["OOD, disagreement, conformal restraint"]
+  F --> U["OOD, disagreement, adaptive feedback restraint"]
   B --> G["Immutable bundle gate"]
   X --> G
   U --> G
@@ -49,22 +49,40 @@ Phase 15 uses a multi-axis human ontology instead of a binary fraud label:
 
 The legacy v2 `thin_liquidity_threshold` remains a v2 diagnostic tag used with its causal detector. It should not be interpreted as a Phase 15 fraud threshold, an exclusion rule, or an approval rule.
 
-Phase 15 feature snapshots are causal five-minute buckets with continuous price change, fill count/notional/size, top-of-book spread, bid/ask depth, depth imbalance, freshness, source watermarks, and explicit missingness. This lets a later, separately evaluated model distinguish conditions such as a sparse market print and a move in a liquid market without a hard-coded `if volume < threshold` decision.
+Phase 15 feature snapshots are causal five-minute buckets. They keep `last_trade`, `midpoint`, `best_bid`, and `best_ask` series distinct; the compatibility `price_open`, `price_close`, and `price_change` fields alias only `last_trade`. A series change is unavailable unless at least two distinct event times exist. Matching fill and `LAST_TRADE` observations from the same raw trade frame are deduplicated, while bid/ask observations never become trade returns.
+
+Top-of-book sides and depths have independent observed masks. A one-sided book preserves the observed side instead of failing construction. Midpoint, quoted spread, and depth imbalance are derived only from causally synchronized sides; asynchronous sides remain independently visible but do not form a fabricated pair. Kind-specific price series retain source, raw-artifact, and contributing-record lineage. These contracts make sparse-market conditions inspectable without a hard-coded `if volume < threshold` decision.
 
 ## 4. Specialist baseline and neural readiness gates
 
-The first evaluable model path is calibrated, interpretable specialist baselines and late fusion. A candidate can be evaluated only after the as-of event snapshot and features meet all applicable gates:
+The first evaluable model path is calibrated, interpretable specialist baselines and late fusion. For the compatibility-named naive baselines, orchestration v5 admits only the checked-in immutable `NaiveBaselineFeatureSpec`; its canonical hash identifies the versioned derivation semantics. Assembly recomputes `price_change` and `volume` from frozen, exactly scoped `MarketStateSlice` facts rather than trusting caller numbers:
 
-- no future or later-ingested facts;
+- the primary event is the terminal `MarketStateSlice`; its `event_time` must equal `window_ends_at`, and it fixes one exact 300-second lookback window;
+- admitted market slices must cover that full window contiguously and without gaps, overlaps, subsets, or out-of-window/multiday facts;
+- `price_change` is the last non-null trade price minus the first non-null trade price within that window and requires at least two distinct trade-price event times;
+- `volume` sums each admitted slice's non-null observed `trade_notional` exactly once;
+- the feature observation clock is the terminal window end and availability is the maximum availability clock across the exact-window market slices;
+- feature identity is the exact `(market_uid, outcome_uid)` pair, including the primary event fact;
+- admitted sources are restricted to exact-identity `MarketStateSlice` facts and exact-identity `OnChainSettlementFact` actor facts with a non-null `observed_wallet_uid`;
+- admitted on-chain facts must also fall within that exact window and be available no later than the market-derived feature availability. They may contribute a pseudonymous actor UID for split provenance, but never a numeric naive-baseline value. Cross-outcome market facts, unrelated or unidentified actor facts, and all other source modalities fail closed.
+
+Caller identity, values, clocks, source/raw lineage, specification hash, snapshot UID, and cutoff must exactly match recomputation. The snapshot manifest's `as_of` must exactly equal the assembly cutoff. Unknown specifications, insufficient price history, missing volume, or any mismatch fail closed. Identical duplicate feature UIDs are deduplicated and conflicting duplicates are rejected.
+
+Assembly identity is also content-bound. `input_hash` canonically covers complete accepted rows—including the feature declaration, labels/adjudication, coverage/context, derived values, fixed-window clocks, modality, and actor provenance. Every excluded record retains and hashes the complete immutable caller input plus its reason, so distinct rejected bodies cannot collapse to one identity. `run_uid` binds orchestration v5, `as_of`, the snapshot manifest, feature-specification hash, input hash, and accepted/excluded identities. Direct `AsOfAssembly` construction reruns causal and window derivation and verifies both hashes; changing a label, coverage state, rejected payload, exclusion reason, derived value, window, input hash, or run UID fails closed. Input ordering and exact duplicates do not change the canonical result.
+
+This is a narrow deterministic contract for the two current naive compatibility baselines. It is not a general feature-computation pipeline and does not validate proposed specialist, multimodal, wallet-sequence, SEC, or neural features. A candidate can be evaluated only after the as-of event snapshot and admitted naive features meet all applicable gates:
+
+- every feature input is recomputed and bound to the exact as-of snapshot and cutoff, with feature observation/availability clocks, admitted source-fact UIDs, exactly matching raw-artifact UIDs, and the checked-in feature-specification hash;
+- no future or later-available facts or feature rows;
 - complete required coverage and context;
 - human adjudications present and training eligible;
-- fixed forward, event-cluster-, market-, and actor-disjoint partitions;
+- fixed forward, event-cluster-, market-, and actor-disjoint partitions, with actor identifiers derived only from admitted fact provenance and cross-boundary groups dropped;
 - explicit baseline labels and a fixed plan;
-- calibration counts and class coverage sufficient for the frozen gate.
+- separately predeclared validation and untouched-test minimum labeled, positive, and negative counts, counted over unique evaluation row UIDs.
 
 Even `ready_for_candidate_evaluation` does not allow serving. Candidate metadata is unapproved and unpublished by construction.
 
-The shared/private event-space neural module is experimental. It accepts precomputed numeric modality values and masks, retains private modality features alongside a shared representation, and applies late fusion. It has no default weights, does not collect data, and does not silently replace an unavailable runtime with a heuristic. Protected execution requires an explicitly approved bundle; no current workflow creates that approval.
+The shared/private event-space neural module is experimental. It accepts precomputed numeric modality values and masks, retains private modality features alongside a shared representation, and applies late fusion. It has no default weights, does not collect data, and does not silently replace an unavailable runtime with a heuristic. Protected execution now fails closed unconditionally: a Boolean, manifest, or arbitrary caller object cannot unlock it. The repository has no cryptographically bound, independently approved object tying an in-memory `state_dict`, model specification, calibration artifacts, and operational attestation together.
 
 ## 5. Retrieval before ANN
 
@@ -72,11 +90,13 @@ Retrieval uses separate modality indexes and exact `faiss.IndexFlatIP` search ov
 
 HNSW and IVF-PQ are deliberately unavailable. Promote an ANN implementation only after it meets predeclared gates against exact Flat retrieval: Recall@K, temporal holdouts, provenance behavior, calibration/selective-risk behavior, and missing-modality behavior. A faster index is not a substitute for validated retrieval geometry.
 
-## 6. Restraint layer: OOD, abstention, and conformal routing
+## 6. Restraint layer: OOD, abstention, and adaptive feedback routing
 
-The restraint layer can abstain for insufficient observed modalities, weak support, cross-modality disagreement, unavailable calibration, insufficient OOD reference data, or an out-of-distribution result. OOD scoring is based on an explicit reference population using k-nearest-neighbor distance and an energy-like distance measure; its score is not a probability of fraud.
+The restraint layer can abstain for insufficient observed modalities, weak support, cross-modality disagreement, unavailable calibration, insufficient OOD reference data, or an out-of-distribution result. Cross-modal disagreement is the maximum bounded Jensen-Shannon distance between observed specialists on a common mechanism axis, so specialists that support disjoint mechanisms produce maximal disagreement even when their score maps are sparse. OOD scoring is based on an explicit reference population using k-nearest-neighbor distance and an energy-like distance measure; its score is not a probability of fraud.
 
-The rolling conformal controller uses only analyst feedback available by `as_of`. It withholds escalation when feedback history is insufficient, adjusts a conservative operational threshold from unsupported escalations, and respects an analyst daily queue budget. Its `supported` feedback field means useful to the analyst workflow, not a legal or misconduct label.
+The `AdaptiveFeedbackThresholdController` uses only analyst feedback available by `as_of`. It withholds escalation when feedback history is insufficient, adjusts an empirical operational threshold from unsupported escalations, requires scores to be strictly above that threshold, and respects an analyst daily queue budget. Its `supported` field means useful to the analyst workflow, not a legal or misconduct label. This is a heuristic and makes no conformal coverage or finite-sample risk-control guarantee. `RollingConformalRiskController` remains only as a deprecated compatibility name.
+
+Calibration also fails closed: if one-vs-rest isotonic calibration yields all-zero class support, calibration is unavailable. The implementation does not return the uncalibrated support as a fallback.
 
 ## 7. Immutable bundles and read-only v3 serving
 
@@ -124,6 +144,6 @@ Treat `not_ready`, missing calibration, or any abstention reason as an outcome t
 5. Obtain independent human multi-axis adjudications; preserve unknown/unmapped cases.
 6. Run `cli_v3 assemble` and `readiness`; record every reason code.
 7. Evaluate baselines only on frozen forward disjoint partitions if gates pass. Compare any neural proposal to the baseline on unseen markets, time holdouts, calibration, and selective risk.
-8. Keep retrieval exact until ANN promotion gates pass. Keep v3 on metadata/frozen routing only until artifact, provenance, label, calibration, OOD, conformal, and human-policy gates are all independently satisfied.
+8. Keep retrieval exact until ANN promotion gates pass. Keep v3 on metadata/frozen routing only until artifact, provenance, label, calibration, OOD, statistically justified conformal control, and human-policy gates are all independently satisfied. The current adaptive feedback heuristic does not satisfy the conformal gate.
 
 The system should remain unavailable or abstain whenever that sequence lacks evidence.

@@ -3,12 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from marketleak.multimodal.baselines import (
     BaselineAvailability,
     MarketMechanismBaseline,
     MechanismExample,
+    _OneVsRestIsotonicCalibrator,
 )
 from marketleak.multimodal.bundles import (
     ARTIFACT_NAMES,
@@ -86,6 +88,29 @@ def test_baseline_outputs_observable_mechanisms_only() -> None:
         ObservableMechanism.THIN_LIQUIDITY_ARTIFACT.value,
     }
     assert all(term not in " ".join(names) for term in ("fraud", "insider", "misconduct"))
+
+
+def test_all_zero_isotonic_output_makes_prediction_unavailable() -> None:
+    # Minimal zero-output fixture verifies fail-closed calibration mechanics;
+    # it is not evidence about predictive effectiveness.
+    fit = _examples(T0, "fit", ("f1", "f2", "f3", "f4"))
+    calibration = _examples(T0 + timedelta(days=1), "cal", ("c1", "c2", "c3", "c4"))
+    evaluation = _examples(T0 + timedelta(days=2), "eval", ("e1", "e2", "e3", "e4"))
+    model = _baseline()
+    assert model.fit(fit, calibration, evaluation).availability is BaselineAvailability.AVAILABLE
+
+    class _ZeroIsotonic:
+        def predict(self, support: np.ndarray) -> np.ndarray:
+            return np.zeros_like(support, dtype=float)
+
+    calibrator = _OneVsRestIsotonicCalibrator(model._classes)
+    calibrator._models = {name: _ZeroIsotonic() for name in model._classes}
+    model._calibrator = calibrator
+
+    prediction = model.predict({"price_move": 0.85, "depth_change": 0.25})
+    assert prediction.availability is BaselineAvailability.UNAVAILABLE
+    assert prediction.reason == "calibration_unavailable:all_calibrated_support_zero"
+    assert prediction.ranked_mechanisms == ()
 
 
 def _artifact_paths(root: Path) -> dict[str, Path]:

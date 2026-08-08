@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import ceil, exp, log
 from typing import Iterable, Mapping, Sequence
+import warnings
 
 import numpy as np
 
@@ -250,14 +251,14 @@ class QueueDecision:
     reasons: tuple[str, ...]
 
 
-class RollingConformalRiskController:
-    """Future-free adaptive thresholding with an explicit daily queue budget.
+class AdaptiveFeedbackThresholdController:
+    """Future-free adaptive heuristic with an explicit daily queue budget.
 
-    The conformal component uses only feedback available at ``as_of``.  It
-    derives a conservative score cutoff from recent unsupported escalations and
-    nudges that cutoff upward if their observed rate exceeds the configured
-    operational risk budget.  With no feedback it abstains rather than inventing
-    validation.
+    This is not a conformal-risk method and makes no finite-sample coverage or
+    risk-control guarantee.  It derives an operational cutoff from recent
+    unsupported escalations and nudges that cutoff upward if their observed
+    rate exceeds the configured workflow budget.  With insufficient feedback
+    it abstains rather than inventing validation.
     """
 
     def __init__(
@@ -276,12 +277,17 @@ class RollingConformalRiskController:
         self.window_size = int(window_size)
         self.learning_rate = float(learning_rate)
         self.min_feedback = int(min_feedback)
-        self._feedback: list[ConformalFeedback] = []
+        self._feedback: dict[str, ConformalFeedback] = {}
 
     def record(self, feedback: ConformalFeedback) -> None:
-        """Append immutable analyst feedback; ordering is resolved at query time."""
+        """Record feedback idempotently and reject conflicting duplicate UIDs."""
 
-        self._feedback.append(feedback)
+        prior = self._feedback.get(feedback.candidate_uid)
+        if prior is None:
+            self._feedback[feedback.candidate_uid] = feedback
+            return
+        if prior != feedback:
+            raise ValueError("conflicting feedback for candidate_uid")
 
     def available_feedback(self, *, as_of: datetime) -> tuple[ConformalFeedback, ...]:
         cutoff = _utc(as_of)
@@ -289,7 +295,7 @@ class RollingConformalRiskController:
         # decisions themselves cannot originate after it.
         usable = [
             item
-            for item in self._feedback
+            for item in self._feedback.values()
             if item.feedback_time <= cutoff and item.decision_time <= cutoff
         ]
         usable.sort(key=lambda item: (item.feedback_time, item.decision_time, item.candidate_uid))
@@ -298,15 +304,15 @@ class RollingConformalRiskController:
     def threshold(self, *, as_of: datetime) -> tuple[float | None, str | None]:
         feedback = self.available_feedback(as_of=as_of)
         if len(feedback) < self.min_feedback:
-            return None, "conformal_history_unavailable"
+            return None, "adaptive_feedback_history_unavailable"
         unsupported_scores = np.asarray([item.score for item in feedback if not item.supported], dtype=float)
         observed_rate = 1.0 - (sum(item.supported for item in feedback) / len(feedback))
         adaptive = self.learning_rate * (observed_rate - self.target_unsupported_rate)
         threshold = self.base_threshold + adaptive
         if len(unsupported_scores):
-            # Finite-sample conformal-style upper order statistic: selecting
-            # scores at or below this boundary would resemble known unsupported
-            # escalations, so escalation requires a strictly higher score.
+            # Empirical upper order statistic only: selecting scores at or
+            # below this boundary would resemble known unsupported escalations,
+            # so escalation requires a strictly higher score.
             rank = min(len(unsupported_scores) - 1, max(0, ceil((len(unsupported_scores) + 1) * (1.0 - self.target_unsupported_rate)) - 1))
             threshold = max(threshold, float(np.sort(unsupported_scores)[rank]))
         return float(min(1.0, max(0.0, threshold))), None
@@ -328,8 +334,8 @@ class RollingConformalRiskController:
             reasons = list(candidate.decision.reasons)
             if unavailable_reason:
                 reasons.append(unavailable_reason)
-            elif candidate.score < float(threshold):
-                reasons.append("below_conformal_threshold")
+            elif candidate.score <= float(threshold):
+                reasons.append("at_or_below_adaptive_threshold")
             elif admitted >= analyst_daily_budget:
                 reasons.append("analyst_budget_exhausted")
             escalate = not reasons
@@ -346,8 +352,22 @@ class RollingConformalRiskController:
         return tuple(decisions)
 
 
+class RollingConformalRiskController(AdaptiveFeedbackThresholdController):
+    """Deprecated name for :class:`AdaptiveFeedbackThresholdController`."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        warnings.warn(
+            "RollingConformalRiskController is deprecated because this controller is an adaptive heuristic, "
+            "not a conformal-risk method; use AdaptiveFeedbackThresholdController",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
+
+
 __all__ = [
     "AbstentionDecision",
+    "AdaptiveFeedbackThresholdController",
     "ConformalFeedback",
     "OODResult",
     "QueueCandidate",

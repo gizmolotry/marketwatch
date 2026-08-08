@@ -695,6 +695,142 @@ class FeatureSurprise:
         }
 
 
+SignalClassification = Literal["high", "elevated", "routine", "insufficient_data"]
+
+
+@dataclass(frozen=True, slots=True)
+class WalletSignalAssessment:
+    """One coherent, non-probabilistic assessment for analyst triage.
+
+    ``coverage_confidence`` describes only the population data contract.
+    ``signal_strength`` and ``statistical_support`` describe only the
+    peer-relative calculation.  Neither field is a fraud confidence.
+    """
+
+    status: Literal["available", "abstain", "unavailable"]
+    classification: Literal["high", "elevated", "routine", "unavailable"]
+    review_priority: Literal["high", "elevated", "routine", "unavailable"]
+    signal_strength: Literal["high", "elevated", "routine", "unavailable"]
+    statistical_support: Literal["sufficient", "insufficient", "unavailable"]
+    coverage_status: Literal["complete", "partial", "unavailable", "unknown"]
+    coverage_confidence: Literal["verified_complete", "limited", "unavailable", "unknown"]
+    population_rank: int | None
+    population_size: int | None
+    summary: str
+    decision_owner: Literal["human_reviewer"] = "human_reviewer"
+
+    @classmethod
+    def derive(
+        cls,
+        *,
+        report_status: Literal["available", "abstain"],
+        row: RankedWallet | None,
+        coverage_status: CoverageStatus,
+    ) -> WalletSignalAssessment:
+        return cls.derive_values(
+            report_status=report_status,
+            row_status=None if row is None else row.status,
+            signal_classification="insufficient_data" if row is None else row.signal_classification,
+            coverage_status=coverage_status,
+            population_rank=None if row is None else row.population_rank,
+            population_size=None if row is None else row.population_size,
+        )
+
+    @classmethod
+    def derive_values(
+        cls,
+        *,
+        report_status: Literal["available", "abstain"],
+        row_status: Literal["available", "abstain"] | None,
+        signal_classification: SignalClassification,
+        coverage_status: CoverageStatus,
+        population_rank: int | None,
+        population_size: int | None,
+    ) -> WalletSignalAssessment:
+        coverage_confidence: Literal["verified_complete", "limited", "unavailable", "unknown"] = {
+            CoverageStatus.COMPLETE: "verified_complete",
+            CoverageStatus.PARTIAL: "limited",
+            CoverageStatus.UNAVAILABLE: "unavailable",
+            CoverageStatus.UNKNOWN: "unknown",
+        }[coverage_status]
+        coverage_unavailable = coverage_status in {CoverageStatus.UNAVAILABLE, CoverageStatus.UNKNOWN}
+        row_available = (
+            report_status == "available"
+            and row_status == "available"
+            and signal_classification in {"high", "elevated", "routine"}
+        )
+        if coverage_unavailable:
+            return cls(
+                status="unavailable",
+                classification="unavailable",
+                review_priority="unavailable",
+                signal_strength="unavailable",
+                statistical_support="unavailable",
+                coverage_status=coverage_status.value,
+                coverage_confidence=coverage_confidence,
+                population_rank=None,
+                population_size=None,
+                summary="Signal assessment unavailable because population coverage is unavailable or unknown.",
+            )
+        if coverage_status == CoverageStatus.PARTIAL:
+            return cls(
+                status="abstain",
+                classification="unavailable",
+                review_priority="unavailable",
+                signal_strength="unavailable",
+                statistical_support="unavailable",
+                coverage_status=coverage_status.value,
+                coverage_confidence=coverage_confidence,
+                population_rank=None,
+                population_size=None,
+                summary="Signal assessment abstained because complete population coverage is required for percentile and rank claims.",
+            )
+        if not row_available:
+            return cls(
+                status="abstain",
+                classification="unavailable",
+                review_priority="unavailable",
+                signal_strength="unavailable",
+                statistical_support="insufficient",
+                coverage_status=coverage_status.value,
+                coverage_confidence=coverage_confidence,
+                population_rank=population_rank,
+                population_size=population_size,
+                summary="Signal assessment abstained because required inputs or statistical support were insufficient.",
+            )
+        level = signal_classification
+        return cls(
+            status="available",
+            classification=level,
+            review_priority=level,
+            signal_strength=level,
+            statistical_support="sufficient",
+            coverage_status=coverage_status.value,
+            coverage_confidence=coverage_confidence,
+            population_rank=population_rank,
+            population_size=population_size,
+            summary=(
+                f"{level.capitalize()} peer-relative signal strength with sufficient statistical support "
+                "in the declared cohort."
+            ),
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "classification": self.classification,
+            "review_priority": self.review_priority,
+            "signal_strength": self.signal_strength,
+            "statistical_support": self.statistical_support,
+            "coverage_status": self.coverage_status,
+            "coverage_confidence": self.coverage_confidence,
+            "population_rank": self.population_rank,
+            "population_size": self.population_size,
+            "summary": self.summary,
+            "decision_owner": self.decision_owner,
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class RankedWallet:
     actor_uid: str
@@ -716,9 +852,11 @@ class RankedWallet:
     operational_review_rank: int | None = None
     hindsight_peer_rank: int | None = None
     scores_are_probabilities: Literal[False] = False
-    signal_classification: Literal["high", "elevated", "routine", "insufficient_data"] = "insufficient_data"
+    signal_classification: SignalClassification = "insufficient_data"
 
     def to_payload(self) -> dict[str, Any]:
+        available_signal = self.status == "available" and self.signal_classification != "insufficient_data"
+        signal_level = self.signal_classification if available_signal else "unavailable"
         return {
             "actor_uid": self.actor_uid,
             "status": self.status,
@@ -739,7 +877,9 @@ class RankedWallet:
             "operational_review_rank": self.operational_review_rank,
             "hindsight_peer_rank": self.hindsight_peer_rank,
             "signal_classification": self.signal_classification,
-            "review_priority": self.signal_classification,
+            "review_priority": signal_level,
+            "signal_strength": signal_level,
+            "statistical_support": "sufficient" if available_signal else "insufficient",
         }
 
 
@@ -767,24 +907,27 @@ class CohortRankingReport:
     prospective_eligible: bool = False
     operational_review_priority: None = None
 
+    def assessment_for(self, actor_uid: str | None = None) -> WalletSignalAssessment:
+        if actor_uid is None:
+            row = self.rows[0] if len(self.rows) == 1 else None
+        else:
+            row = next((item for item in self.rows if item.actor_uid == actor_uid), None)
+        return WalletSignalAssessment.derive(
+            report_status=self.status,
+            row=row,
+            coverage_status=self.coverage.status,
+        )
+
     @property
     def report_sha256(self) -> str:
         return sha256(canonical_json_bytes(self._unsigned_payload())).hexdigest()
 
     def _unsigned_payload(self) -> dict[str, Any]:
-        primary = self.rows[0] if len(self.rows) == 1 else None
-        signal_confidence = "insufficient_data" if primary is None or primary.status != "available" else "high"
+        assessment = self.assessment_for()
         return {
-            "schema_version": "wallet-cohort-ranking-v1",
-            "signal_assessment": {
-                "classification": "insufficient_data" if primary is None else primary.signal_classification,
-                "review_priority": "insufficient_data" if primary is None else primary.signal_classification,
-                "confidence": signal_confidence,
-                "coverage": "complete" if self.coverage.status == CoverageStatus.COMPLETE else self.coverage.status.value,
-                "population_rank": None if primary is None else primary.population_rank,
-                "population_size": None if primary is None else primary.population_size,
-                "decision_owner": "human_reviewer",
-            },
+            "schema_version": "wallet-cohort-ranking-v2",
+            "supersedes_schema_version": "wallet-cohort-ranking-v1",
+            "signal_assessment": assessment.to_payload(),
             "policy": self.policy.to_payload(),
             "coverage": self.coverage.to_payload(),
             "status": self.status,
@@ -1380,5 +1523,6 @@ __all__ = [
     "RankedWallet",
     "WalletCohortPolicy",
     "WalletEventFeatureVector",
+    "WalletSignalAssessment",
     "rank_wallet_cohort",
 ]

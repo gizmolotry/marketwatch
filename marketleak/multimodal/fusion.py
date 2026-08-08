@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from math import exp
+from math import exp, log, sqrt
 from typing import Iterable, Mapping, Sequence
 
 import numpy as np
@@ -263,19 +263,12 @@ class DeterministicLateFusion:
                 per_mechanism.setdefault(mechanism, []).append((score, status.effective_weight, status.modality))
 
         ranked: list[RankedMechanism] = []
-        disagreement_values: list[float] = []
         for mechanism, contributions in per_mechanism.items():
             values = np.asarray([row[0] for row in contributions], dtype=float)
             weights = np.asarray([row[1] for row in contributions], dtype=float)
             fused = float(np.average(values, weights=weights))
             if self.calibrator is not None:
                 fused = self.calibrator.transform(fused)
-            # Weighted standard deviation is bounded in [0, .5] for values in
-            # [0, 1]; multiply by two to expose an intuitive [0, 1] restraint
-            # signal.  A single modality has no cross-modal disagreement.
-            if len(values) > 1:
-                variance = float(np.average((values - np.average(values, weights=weights)) ** 2, weights=weights))
-                disagreement_values.append(min(1.0, 2.0 * float(np.sqrt(variance))))
             ranked.append(
                 RankedMechanism(
                     mechanism=mechanism,
@@ -290,13 +283,75 @@ class DeterministicLateFusion:
             as_of=cutoff,
             ranked_mechanisms=tuple(ranked),
             modality_status=tuple(statuses),
-            disagreement=max(disagreement_values, default=0.0),
+            disagreement=_cross_modal_mechanism_disagreement(by_modality, statuses),
             observed_modalities=len(observed),
             expected_modalities=len(expected),
             missing_modalities=missing,
             calibration_available=calibration_available,
             calibration_reason=calibration_reason,
         )
+
+
+def _cross_modal_mechanism_disagreement(
+    by_modality: Mapping[str, ModalityEvidence],
+    statuses: Sequence[ModalityStatus],
+) -> float:
+    """Return the maximum bounded Jensen-Shannon distance across modalities.
+
+    Every observed modality is projected onto the same sorted mechanism axis.
+    A mechanism omitted by an otherwise observed specialist has zero declared
+    support, while an entirely missing or zero-weight modality is excluded by
+    the observation mask.  An explicit no-support bin distinguishes an
+    observed all-zero specialist output from missing modality evidence.
+
+    Normalizing the declared support isolates disagreement about *which*
+    mechanism is supported; absolute support remains represented by the fused
+    scores and the weak-support restraint.  The returned distance is in [0, 1],
+    and disjoint support such as ``{x: 1}`` versus ``{y: 1}`` is exactly 1.
+    """
+
+    observed_modalities = tuple(
+        status.modality
+        for status in statuses
+        if not status.missing and status.effective_weight > 0.0
+    )
+    if len(observed_modalities) < 2:
+        return 0.0
+    mechanisms = tuple(
+        sorted(
+            {
+                mechanism
+                for modality in observed_modalities
+                for mechanism in by_modality[modality].mechanism_scores
+            }
+        )
+    )
+    support = np.asarray(
+        [
+            [by_modality[modality].mechanism_scores.get(mechanism, 0.0) for mechanism in mechanisms]
+            for modality in observed_modalities
+        ],
+        dtype=float,
+    )
+    totals = support.sum(axis=1, keepdims=True)
+    normalized = np.divide(support, totals, out=np.zeros_like(support), where=totals > 0.0)
+    no_support = (totals[:, 0] <= 0.0).astype(float).reshape(-1, 1)
+    distributions = np.concatenate((normalized, no_support), axis=1)
+
+    maximum = 0.0
+    for left_index in range(len(distributions) - 1):
+        for right_index in range(left_index + 1, len(distributions)):
+            left = distributions[left_index]
+            right = distributions[right_index]
+            midpoint = 0.5 * (left + right)
+            left_positive = left > 0.0
+            right_positive = right > 0.0
+            divergence = 0.5 * float(
+                np.sum(left[left_positive] * np.log(left[left_positive] / midpoint[left_positive]))
+                + np.sum(right[right_positive] * np.log(right[right_positive] / midpoint[right_positive]))
+            )
+            maximum = max(maximum, sqrt(max(0.0, divergence) / log(2.0)))
+    return float(min(1.0, maximum))
 
 
 __all__ = [

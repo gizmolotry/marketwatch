@@ -87,7 +87,7 @@ else:
         assert model.mechanism_head.out_features == len(neural.MECHANISM_LABELS)
         assert model.evidence_head.out_features == len(neural.EVIDENCE_LABELS)
 
-    def test_eval_mode_is_deterministic_and_protected_execution_requires_approval():
+    def test_eval_mode_is_deterministic_and_protected_execution_cannot_be_unlocked_by_a_boolean():
         torch.manual_seed(17)
         model = neural.ExperimentalEventSpace(spec()).eval()
         batch = inputs()
@@ -98,6 +98,8 @@ else:
         torch.testing.assert_close(first.evidence_logits, second.evidence_logits, rtol=0.0, atol=0.0)
         with pytest.raises(neural.BundleApprovalRequired):
             model(**batch, production=True)
-        with torch.no_grad():
-            protected = model(**batch, production=True, approved_bundle=True)
-        assert tuple(protected.fused_embedding.shape) == (2, 7)
+        with pytest.warns(DeprecationWarning, match="cannot unlock"):
+            with pytest.raises(neural.BundleApprovalRequired, match="no verified approval object"):
+                model(**batch, production=True, approved_bundle=True)
+        with pytest.raises(neural.BundleApprovalRequired, match="no verified approval object"):
+            model(**batch, production=True, verified_bundle=object())

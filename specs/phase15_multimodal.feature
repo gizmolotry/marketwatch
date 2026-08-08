@@ -56,11 +56,26 @@ Feature: Point-in-time multimodal market-integrity assessment
       Then the feature window starts at "2026-07-13T12:00:00Z"
       And the feature window ends at "2026-07-13T12:05:00Z"
       And it contains observation, fill, and book counts
-      And it contains price open, price close, and price change when observed
+      And it keeps last-trade, midpoint, best-bid, and best-ask price series distinct
+      And the compatibility price open, close, and change fields alias only the last-trade series
+      And a price change is unavailable unless its series has two distinct event times
       And it contains fill notional and mean fill size when observed
-      And it contains quoted spread, bid depth, ask depth, and depth imbalance when observed
+      And it contains independently masked best bid, best ask, bid depth, and ask depth when observed
+      And quoted spread, midpoint, and depth imbalance are available only for causally synchronized sides
       And the snapshot retains aggregate contributor UID lists for observations, fills, books, and raw artifacts
-      And it does not claim per-feature lineage beyond those aggregate contributor lists
+      And each kind-specific price series retains its source, raw-artifact, and record lineage
+      # Executable mapping: tests/phase15/test_market_features.py::test_bbo_only_series_do_not_fabricate_a_primary_trade_change_or_follow_uid_order
+      # Executable mapping: tests/phase15/test_market_features.py::test_trade_primary_series_deduplicates_matching_fill_observations_and_ignores_bbo
+
+    @implemented @features @missingness
+    Scenario: Preserve one-sided and asynchronous books without fabricating a pair
+      Given only one side of an order book is observed or the two sides come from different causal quote frames
+      When the system builds a market feature snapshot
+      Then each observed side and its depth remain available independently
+      And the absent side remains null with an unobserved mask
+      And no midpoint, quoted spread, or depth imbalance is fabricated from unmatched sides
+      # Executable mapping: tests/phase15/test_market_features.py::test_one_sided_bid_and_ask_books_keep_independent_values_and_masks
+      # Executable mapping: tests/phase15/test_market_features.py::test_stale_asynchronous_sides_are_not_paired_for_midpoint_spread_or_depth_imbalance
 
     @implemented @features @missingness
     Scenario: Preserve an unavailable trade or book stream as missing
@@ -255,6 +270,69 @@ Feature: Point-in-time multimodal market-integrity assessment
 
   Rule: Training requires frozen, leakage-resistant evidence
 
+    @implemented @training @provenance @future_leakage
+    Scenario: Exclude an unbound or post-cutoff feature row
+      Given a numeric feature row is not bound to the exact event snapshot and cutoff
+      Or its feature observation or availability clock is later than the cutoff
+      Or it lacks admitted source-fact UIDs, matching raw-artifact UIDs, or a frozen feature-specification hash
+      When the as-of assembly is built
+      Then the feature row is excluded with a deterministic reason code
+      And no unbound caller feature map becomes an evaluation row
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_unbound_feature_metadata_fails_closed_with_explicit_reasons
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_future_feature_clocks_are_excluded_even_when_source_fact_is_past
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_unknown_feature_spec_is_excluded_even_when_declarations_are_self_consistent
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_direct_assembly_rejects_snapshot_with_a_different_cutoff
+
+    @implemented @training @features @provenance
+    Scenario: Recompute compatibility-baseline values over one exact five-minute window
+      Given a feature row declares source facts admitted by the exact event snapshot and cutoff
+      And the declared feature specification is the immutable versioned NaiveBaselineFeatureSpec
+      When the as-of assembly validates the feature row
+      Then price change is recomputed as the last trade price minus the first trade price across at least two distinct event times
+      And volume is recomputed as the sum of observed trade notional for exact market-and-outcome market-state facts
+      And the feature identity is the exact market UID plus outcome UID
+      And the primary event is the terminal MarketStateSlice for that identity
+      And its event time equals its slice end
+      And the feature window is exactly 300 seconds ending at that primary slice
+      And only exact-identity market-state facts and exact-identity on-chain facts with a non-null observed wallet UID are admitted as sources
+      And cross-outcome market facts, unrelated actor facts, unidentified actor facts, and every other source modality are excluded
+      And market slices provide complete, contiguous, non-overlapping coverage of the entire fixed window
+      And price change uses the first and last distinct trade-price points in that window
+      And volume sums each admitted slice's observed trade notional once
+      And admitted on-chain facts occur inside the same window and were available no later than the market-derived feature availability
+      And admitted on-chain facts may contribute pseudonymous actor provenance but do not contribute numeric compatibility-baseline values
+      And caller values, clocks, feature-specification hash, snapshot UID, and cutoff must exactly match the recomputation
+      And an unknown feature specification, one trade-price time, or mismatched caller value is excluded with an explicit reason
+      But this derivation contract covers only the current naive compatibility baselines, not future specialist features
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_arbitrary_caller_numbers_cannot_replace_values_derived_from_frozen_facts
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_one_market_price_point_cannot_produce_required_price_change
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_valid_market_slices_cover_one_exact_contiguous_five_minute_window
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_overlapping_or_gapped_slices_cannot_double_count_or_subset_volume
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_incomplete_market_slice_subset_cannot_claim_full_window_features
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_arbitrary_eight_day_price_horizon_is_outside_fixed_window
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_same_market_different_outcome_facts_cannot_fabricate_a_return
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_primary_event_identity_must_match_feature_market_and_outcome
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_unrelated_or_unidentified_actor_facts_cannot_enter_row_lineage
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_later_actor_fact_cannot_enter_an_earlier_feature
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_direct_assembly_recomputes_values_and_rejects_duplicate_row_uids
+
+    @implemented @training @hash @tamper_evidence
+    Scenario: Bind the complete causal assembly into canonical identities
+      Given accepted rows contain complete feature declarations, labels, adjudications, coverage, context, derived values, clocks, modality, and actor provenance
+      And excluded inputs retain their feature UID, event UID, and reason
+      When orchestration v5 builds the assembly
+      Then the canonical input hash binds every accepted row payload and every excluded record
+      And the run UID binds the schema version, cutoff, snapshot manifest, feature-specification hash, input hash, and accepted and excluded identities
+      And input order and exact duplicates do not change either identity
+      And each excluded record retains the complete immutable caller input plus its reason
+      And distinct rejected caller bodies produce distinct input hashes and run UIDs
+      And direct assembly construction revalidates derivation, input hash, and run UID
+      And tampering with labels, adjudication, coverage, context, derived values, exclusions, input hash, or run UID fails closed
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_direct_assembly_hash_binds_labels_coverage_and_context
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_direct_assembly_hash_binds_exclusions_and_run_identity
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_builder_hashes_are_deterministic_across_input_order_and_exact_duplicates
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_distinct_rejected_payloads_produce_distinct_input_and_run_hashes
+
     @implemented @training @readiness
     Scenario Outline: Reject candidate evaluation when a current readiness prerequisite is missing
       Given readiness prerequisite "<prerequisite>" is not satisfied
@@ -269,7 +347,8 @@ Feature: Point-in-time multimodal market-integrity assessment
         | required source coverage and market context       |
         | eligible human multi-axis adjudications           |
         | fixed evaluation plan and required holdout groups |
-        | sufficient calibration counts and class coverage  |
+        | sufficient validation counts and class coverage   |
+        | sufficient test counts and class coverage         |
 
     @implemented @training @splits
     Scenario: Keep current holdout groups out of different data partitions
@@ -277,6 +356,32 @@ Feature: Point-in-time multimodal market-integrity assessment
       When the corpus is partitioned into training, calibration, and test sets
       Then all 23 contracts remain in the same partition
       And current partitions are disjoint by event cluster, market, actor, and forward time as applicable
+      And actor identifiers used for splitting come only from admitted source-fact provenance
+      And on-chain actor facts do not alter the recomputed numeric naive-baseline features
+      And groups crossing temporal partition boundaries are dropped rather than leaked
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_provenance_bound_actor_is_propagated_and_cross_boundary_rows_are_dropped
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_actor_target_refuses_rows_without_provenance_bound_actor_identifiers
+
+    @implemented @training @evaluation @sufficiency
+    Scenario: Withhold candidate evaluation when the untouched test labels are insufficient
+      Given the frozen plan declares minimum labeled, positive, and negative counts for validation and test
+      And the untouched test partition does not meet those minimums
+      When baseline candidate evaluation is requested
+      Then readiness is "not_ready"
+      And the reason includes "test_label_support_gate_not_met"
+      And no evaluation summary is emitted
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_single_test_label_never_emits_candidate_evaluated
+
+    @implemented @training @deduplication @sufficiency
+    Scenario: Duplicate identifiers cannot inflate feature or evaluation support
+      Given identical feature or evaluation rows are repeated under the same stable UID
+      When assembly, readiness, or evaluation counts support
+      Then identical duplicates count once
+      And conflicting content under the same UID is rejected
+      And validation and test support gates count unique rows only
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_repeated_identical_inputs_cannot_inflate_support_counts
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_conflicting_duplicate_feature_uid_is_rejected_before_assembly
+      # Executable mapping: tests/phase15/test_orchestration_validity.py::test_evaluation_support_and_counts_use_unique_row_uids
 
     @target_design @not_current @training @positive_unlabeled
     Scenario: Unprosecuted activity remains unlabeled
@@ -286,7 +391,16 @@ Feature: Point-in-time multimodal market-integrity assessment
       And its activity remains unlabeled unless independently adjudicated
       And evaluation does not report ordinary unlabeled observations as proven negatives
 
-  Rule: Shared-private neural learning is a target design and not a current capability
+  Rule: The neural shell is experimental and protected execution is unavailable
+
+    @implemented @neural @bundle @fail_closed
+    Scenario: A caller cannot unlock protected neural execution with a Boolean or arbitrary object
+      Given the experimental shared-private neural shell is available locally
+      When a caller requests protected execution without a cryptographically bound independently approved artifact object
+      Then protected execution is unavailable
+      And a true Boolean or arbitrary caller object does not establish approval
+      And no current repository object can unlock that execution path
+      # Executable mapping: tests/phase15/test_neural.py::test_eval_mode_is_deterministic_and_protected_execution_cannot_be_unlocked_by_a_boolean
 
     @target_design @not_current @neural
     Scenario: Encode observed modalities into shared and private representations
@@ -322,6 +436,14 @@ Feature: Point-in-time multimodal market-integrity assessment
 
   Rule: Restraint precedes analyst routing
 
+    @implemented @fusion @disagreement
+    Scenario: Detect contradiction across sparse specialist mechanism maps
+      Given two observed specialists assign all support to disjoint mechanisms
+      When deterministic late fusion compares their normalized mechanism distributions
+      Then bounded Jensen-Shannon cross-modal disagreement is maximal
+      And selective restraint can abstain for "cross_modality_disagreement"
+      # Executable mapping: tests/phase15/test_restraint.py::test_disjoint_mechanism_support_is_maximal_disagreement_and_abstains
+
     @implemented @ood @abstention
     Scenario Outline: Abstain when a restraint prerequisite fails
       Given a fused event has restraint condition "<condition>"
@@ -345,22 +467,34 @@ Feature: Point-in-time multimodal market-integrity assessment
       Then the system describes it as unlike the reference population
       And it does not describe the OOD score as a probability of fraud, intent, or wrongdoing
 
-    @implemented @conformal @queue
+    @implemented @adaptive_feedback @queue
     Scenario: Route only with available historical feedback and analyst capacity
       Given at least the configured minimum analyst feedback was available before the cutoff
       And a candidate passes abstention and exceeds the rolling operational threshold
       And the analyst daily budget has remaining capacity
-      When the conformal controller routes the candidate
+      When the adaptive feedback threshold controller routes the candidate
       Then the candidate may enter the analyst queue
       And later feedback cannot change the historical routing threshold
       And "supported" feedback means useful to the analyst workflow rather than proven misconduct
+      And the controller makes no conformal coverage or finite-sample risk guarantee
+      # Executable mapping: tests/phase15/test_restraint.py::test_adaptive_controller_excludes_future_feedback
 
-    @implemented @conformal @queue
+    @implemented @adaptive_feedback @queue
     Scenario: Withhold escalation when feedback or queue capacity is unavailable
-      Given conformal feedback history is insufficient or the analyst daily budget is exhausted
-      When the conformal controller routes candidates
+      Given adaptive feedback history is insufficient or the analyst daily budget is exhausted
+      When the adaptive feedback threshold controller routes candidates
       Then affected candidates are withheld
-      And the reason is "conformal_history_unavailable" or "analyst_budget_exhausted"
+      And the reason is "adaptive_feedback_history_unavailable" or "analyst_budget_exhausted"
+      And the legacy conformal class name is deprecated
+      # Executable mapping: tests/phase15/test_restraint.py::test_adaptive_threshold_is_strict_and_legacy_name_is_deprecated
+
+    @implemented @calibration @fail_closed
+    Scenario: Treat all-zero calibrated support as unavailable
+      Given every class has zero support after one-vs-rest isotonic calibration
+      When the baseline predicts an observable mechanism
+      Then the prediction is unavailable with reason "calibration_unavailable:all_calibrated_support_zero"
+      And the uncalibrated support is not silently returned
+      # Executable mapping: tests/phase15/test_baselines_bundles.py::test_all_zero_isotonic_output_makes_prediction_unavailable
 
   Rule: Evaluation reflects rare-event operations rather than a single ranking score
 
