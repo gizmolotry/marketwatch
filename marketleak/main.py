@@ -18,6 +18,25 @@ PIPELINE_COMPLETION_MESSAGE = (
     "\n[Done] Pipeline complete. Investigative review memos saved to 'reports/'"
 )
 
+
+def _graph_availability(graph_repo):
+    if graph_repo is None:
+        return {
+            "status": "not_initialized",
+            "reason": "graph_repository_not_required",
+            "persisted_graph_available": False,
+            "absence_claim_eligible": False,
+        }
+    payload = getattr(graph_repo, "availability_payload", None)
+    if callable(payload):
+        return payload()
+    return {
+        "status": "unavailable",
+        "reason": "injected_graph_repository_has_no_availability_contract",
+        "persisted_graph_available": False,
+        "absence_claim_eligible": False,
+    }
+
 def main(
     *,
     markets_path="demo_data/markets.parquet",
@@ -57,6 +76,7 @@ def main(
             "anomalies": anomalies if anomalies is not None else pd.DataFrame(),
             "final_results": [],
             "graph_repo": graph_repo,
+            "graph_availability": _graph_availability(graph_repo),
             "blockchain_results": [],
             "v2_results": [],
             "run_status": {
@@ -83,6 +103,8 @@ def main(
     # Initialize Phase 2 components
     leak_model = LeakRiskModel()
     graph_repo = graph_repo or GraphRepository()
+    graph_availability = _graph_availability(graph_repo)
+    persisted_graph_available = graph_availability.get("persisted_graph_available") is True
     blockchain_agent = blockchain_agent or BlockchainAgent()
     
     final_results = []
@@ -134,7 +156,7 @@ def main(
             for wallet_node_id in blockchain_result.wallet_node_ids:
                 paths.extend(graph_repo.find_evidence_paths(wallet_node_id, ["Event"]))
             paths.sort(key=lambda item: item[1], reverse=True)
-            if paths:
+            if paths and persisted_graph_available:
                 max_score = paths[0][1]
                 enrichment = GraphEnrichment(
                     alert_uid=cand.alert_uid,
@@ -161,6 +183,14 @@ def main(
             if result:
                 result['market_slug'] = cand.market_slug
                 result['question'] = cand.question
+                result['graph_availability'] = dict(graph_availability)
+                result['graph_enrichment_status'] = (
+                    "available_with_paths"
+                    if enrichment is not None
+                    else "available_no_paths"
+                    if persisted_graph_available
+                    else "unavailable_persisted_graph"
+                )
 
                 # 6. Build Alert Packet
                 packet = AlertPacket(
@@ -207,6 +237,7 @@ def main(
         "anomalies": anomalies,
         "final_results": final_results,
         "graph_repo": graph_repo,
+        "graph_availability": graph_availability,
         "blockchain_results": blockchain_results,
         "v2_results": (
             anomalies.replace({float("inf"): None, float("-inf"): None}).to_dict("records")

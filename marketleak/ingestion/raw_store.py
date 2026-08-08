@@ -26,6 +26,10 @@ class RawCapture:
     source: str
 
 
+class RawArtifactIntegrityError(IOError):
+    """Raised when a content-addressed object no longer matches its name."""
+
+
 def _atomic_create(path: Path, payload: bytes) -> bool:
     """Create a file atomically and never replace an existing artifact."""
 
@@ -85,6 +89,25 @@ class RawArtifactStore:
         digest = hashlib.sha256(raw).hexdigest()
         object_path = self.objects / digest[:2] / digest[2:4] / f"{digest}.raw"
         _atomic_create(object_path, raw)
+
+        # `_atomic_create` deliberately never replaces an existing object.  An
+        # existing digest-named file therefore has to be authenticated before
+        # this retrieval may receive a new authoritative receipt.  Otherwise a
+        # damaged object could be made to look freshly captured and then flow
+        # into normalization under the expected digest.
+        try:
+            stored_length = object_path.stat().st_size
+            stored_digest = hashlib.sha256(object_path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise RawArtifactIntegrityError(
+                f"raw artifact could not be verified before receipt creation: {digest}"
+            ) from exc
+        if stored_length != len(raw) or stored_digest != digest:
+            raise RawArtifactIntegrityError(
+                "raw artifact integrity mismatch before receipt creation: "
+                f"expected sha256={digest} bytes={len(raw)}, "
+                f"observed sha256={stored_digest} bytes={stored_length}"
+            )
 
         timestamp = utc_datetime(received_at or datetime.now(UTC), "received_at")
         receipt_id = f"{timestamp.strftime('%Y%m%dT%H%M%S.%fZ')}-{uuid.uuid4().hex}"

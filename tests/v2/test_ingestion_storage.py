@@ -4,9 +4,11 @@ import hashlib
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
+
 from marketleak.domain import TradeSide
 from marketleak.ingestion.connectors.polymarket_ws import BestBidAskUpdate, PriceLevelChange
-from marketleak.ingestion.raw_store import RawArtifactStore
+from marketleak.ingestion.raw_store import RawArtifactIntegrityError, RawArtifactStore
 from marketleak.ingestion.storage import NormalizedStore
 
 
@@ -38,6 +40,36 @@ def test_raw_store_is_content_addressed_append_only_and_verifiable(tmp_path):
 
     first.object_path.write_bytes(b"tampered")
     assert store.verify(first) is False
+
+
+def test_tampered_raw_object_cannot_receive_a_fresh_receipt_or_reach_normalization(tmp_path):
+    """A minimal payload fixture verifies the raw-first integrity boundary."""
+
+    store = RawArtifactStore(tmp_path / "raw")
+    payload = b'{"fixture":"raw-delivery"}'
+    first = store.capture(
+        payload,
+        platform="polymarket",
+        source="fixture/raw-integrity",
+        request={"fixture": "initial-capture"},
+        received_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    receipts_before = set(store.receipts.rglob("*.json"))
+    normalized: list[str] = []
+    first.object_path.write_bytes(b"tampered")
+
+    with pytest.raises(RawArtifactIntegrityError, match="before receipt creation"):
+        capture = store.capture(
+            payload,
+            platform="polymarket",
+            source="fixture/raw-integrity",
+            request={"fixture": "recapture"},
+            received_at=datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC),
+        )
+        normalized.append(capture.sha256)
+
+    assert set(store.receipts.rglob("*.json")) == receipts_before
+    assert normalized == []
 
 
 def test_normalized_store_replay_is_idempotent_and_uid_conflict_is_quarantined(tmp_path):

@@ -18,12 +18,12 @@ class StubTransport:
         self.bodies = list(bodies)
         self.calls = []
 
-    def request(self, method, url, *, params, timeout):
+    def request(self, method, url, *, params, timeout, max_response_bytes=None, approved_addresses=None):
         self.calls.append((method, url, dict(params or {}), timeout))
         status, body, headers = self.bodies.pop(0)
         if isinstance(body, str):
             body = body.encode("utf-8")
-        return HttpResponse(status, body, headers, url)
+        return HttpResponse(status, body, headers, url, peer_address=approved_addresses[0])
 
 
 def client(tmp_path, transport):
@@ -281,7 +281,7 @@ def test_polymarket_frozen_end_prevents_moving_head_offset_drift(tmp_path):
         def __init__(self):
             self.calls = []
 
-        def request(self, method, url, *, params, timeout):
+        def request(self, method, url, *, params, timeout, max_response_bytes=None, approved_addresses=None):
             query = dict(params or {})
             self.calls.append((method, url, query, timeout))
             # A newer row appears at the head after page one. Without a frozen
@@ -291,7 +291,10 @@ def test_polymarket_frozen_end_prevents_moving_head_offset_drift(tmp_path):
             visible = stable if query.get("end") == 1767225602 else moving
             offset = query["offset"]
             page = visible[offset : offset + query["limit"]]
-            return HttpResponse(200, json.dumps(page).encode("utf-8"), {}, url)
+            return HttpResponse(
+                200, json.dumps(page).encode("utf-8"), {}, url,
+                peer_address=approved_addresses[0],
+            )
 
     transport = MovingHeadTransport()
     connector = PolymarketConnector(

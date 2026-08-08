@@ -1,7 +1,7 @@
 import duckdb
 import pandas as pd
 from typing import List, Dict, Any
-from marketleak.graph.repository import GraphRepository
+from marketleak.graph.repository import GraphRepository, GraphRepositoryUnavailableError
 
 class WalletClustering:
     def __init__(self, db_path=":memory:"):
@@ -12,6 +12,7 @@ class WalletClustering:
         Uses DuckDB to cluster overlapping participant wallets into proxy_wallet 
         equivalence classes based on co-occurrence in funding/trade networks.
         """
+        graph_repo.require_persisted_graph()
         edges = []
         with graph_repo._lock:
             for u, v, data in graph_repo.graph.edges(data=True):
@@ -125,5 +126,9 @@ if __name__ == "__main__":
     print("Testing WalletClustering with persistent GraphRepository...")
     repo = GraphRepository()
     clustering = WalletClustering()
-    proxies = clustering.cluster_proxy_wallets(repo)
-    print(f"Identified {len(set(proxies.values()))} proxy clusters across {len(proxies)} wallets.")
+    try:
+        proxies = clustering.cluster_proxy_wallets(repo)
+    except GraphRepositoryUnavailableError as exc:
+        print(f"Proxy clustering unavailable: {exc}")
+    else:
+        print(f"Identified {len(set(proxies.values()))} proxy clusters across {len(proxies)} wallets.")

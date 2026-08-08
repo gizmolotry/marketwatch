@@ -31,3 +31,11 @@ C accepts graph claims only when their provenance is independent of the alert. A
 ## Compatibility boundary
 
 Legacy fixtures and endpoints remain read-only compatibility inputs. The v2 audit reports their defects and produces no actor or public-information conclusions. New collection writes under `data/v2`; it never overwrites `demo_data`.
+
+## Local graph persistence boundary
+
+The contextual graph and proxy-cluster cache use versioned, canonical JSON artifacts (`demo_data/graph.json` and `demo_data/cache_clusters.json`). Reads enforce byte, record, nesting, container, and string bounds and validate exact schemas before constructing a graph or returning a wallet-to-cluster mapping. Writes use a flushed temporary file followed by an atomic replacement, so an interrupted replacement leaves the prior artifact authoritative.
+
+Legacy `.pkl` and `.pickle` artifacts are unsupported and are never opened or deserialized. Their presence may be reported for operator cleanup, but no runtime surface silently migrates or trusts them. Missing artifacts produce an unavailable state; corrupt, oversized, non-canonical, or unknown-schema artifacts produce a corrupt/unavailable state rather than an empty-evidence claim.
+
+Graph availability is propagated separately from graph contents. Only a successfully loaded canonical artifact may report `empty_graph_observed=true` or support a zero-path interpretation. Missing and corrupt artifacts report `empty_graph_observed=null`, `absence_claim_eligible=false`, and suppress graph enrichment. Live context collected during that request may still be displayed as partial context, but it cannot repair or disguise the missing persisted graph. Proxy clustering likewise refuses to replace its cache unless the persisted graph was verified.

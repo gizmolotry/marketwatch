@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 import marketleak.api as api
 from marketleak.agents.synthesis_agent import build_truth_safe_memo
+from marketleak.graph.repository import GraphRepository
 from marketleak.models import LeakRiskPrior
 
 
@@ -40,10 +41,11 @@ class OfflineBlockchainAgent:
         raise OSError("offline in unit test")
 
 
-def test_pipeline_converts_none_rag_result_to_neutral_contract(monkeypatch):
+def test_pipeline_converts_none_rag_result_to_neutral_contract(monkeypatch, tmp_path):
     monkeypatch.setattr(api, "_get_rag_agent", lambda: NoEvidenceRAG())
     monkeypatch.setattr(api, "_get_leak_model", lambda: OfflineLeakModel())
     monkeypatch.setattr(api, "BlockchainAgent", OfflineBlockchainAgent)
+    monkeypatch.setattr(api, "GraphRepository", lambda: GraphRepository(tmp_path / "missing-graph.json"))
 
     row = pd.Series(
         {
@@ -77,6 +79,12 @@ def test_pipeline_converts_none_rag_result_to_neutral_contract(monkeypatch):
     assert rag_result["question"] == "Will the example event happen?"
     assert result["ppim_score"] == 0.0
     assert result["report"] is None
+    assert result["graph_availability"]["status"] == "unavailable"
+    assert result["graph_availability"]["empty_graph_observed"] is None
+    assert result["graph_availability"]["absence_claim_eligible"] is False
+    assert result["graph_enrichment_status"] == "unavailable_persisted_graph"
+    assert result["graph_enrichment"] is None
+    assert result["graph_data"]["status"] == "unavailable"
 
 
 def _row():

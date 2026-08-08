@@ -1,35 +1,93 @@
-import os
-import pickle
 from itertools import islice
+from pathlib import Path
 from threading import RLock
 from typing import List, Dict, Any, Tuple
 
 import networkx as nx
 
+from marketleak.graph.safe_persistence import (
+    ArtifactCorruptError,
+    ArtifactUnavailableError,
+    load_graph,
+    save_graph,
+)
+
+
+class GraphRepositoryUnavailableError(RuntimeError):
+    """A persisted graph was not verified and cannot support absence claims."""
+
 
 class GraphRepository:
     MAX_EVIDENCE_PATHS_PER_TARGET = 50
 
-    def __init__(self, persist_path: str = "demo_data/graph.pkl"):
-        self.persist_path = persist_path
+    def __init__(self, persist_path: str = "demo_data/graph.json"):
+        requested = Path(persist_path)
+        self.legacy_persist_path: Path | None = None
+        if requested.suffix.casefold() in {".pkl", ".pickle"}:
+            self.legacy_persist_path = requested
+            requested = requested.with_suffix(".json")
+        self.persist_path = str(requested)
+        self.load_status = "unavailable"
+        self.load_error: str | None = None
         self._lock = RLock()
         self.graph = self._load()
+        self._persisted_node_count = self.graph.number_of_nodes() if self.load_status == "loaded" else None
+        self._persisted_edge_count = self.graph.number_of_edges() if self.load_status == "loaded" else None
+
+    @property
+    def persisted_graph_available(self) -> bool:
+        return self.load_status == "loaded"
+
+    def availability_payload(self) -> dict[str, object]:
+        """Describe storage availability without recasting missing data as zero."""
+
+        available = self.persisted_graph_available
+        return {
+            "status": "available" if available else "unavailable",
+            "storage_state": self.load_status,
+            "reason": "verified_graph_artifact_loaded" if available else self.load_error,
+            "persisted_graph_available": available,
+            "persisted_node_count": self._persisted_node_count,
+            "persisted_edge_count": self._persisted_edge_count,
+            "empty_graph_observed": (
+                self._persisted_node_count == 0 and self._persisted_edge_count == 0
+                if available
+                else None
+            ),
+            "absence_claim_eligible": available,
+        }
+
+    def require_persisted_graph(self) -> None:
+        if not self.persisted_graph_available:
+            raise GraphRepositoryUnavailableError(self.load_error or "graph_artifact_unavailable")
 
     def _load(self) -> nx.MultiDiGraph:
-        if os.path.exists(self.persist_path):
-            try:
-                with open(self.persist_path, "rb") as f:
-                    return pickle.load(f)
-            except Exception as e:
-                print(f"Warning: Failed to load graph from {self.persist_path}: {e}")
-        return nx.MultiDiGraph()
+        legacy = self.legacy_persist_path or Path(self.persist_path).with_suffix(".pkl")
+        if legacy.exists():
+            print(f"Warning: Ignoring unsupported legacy pickle graph artifact at {legacy}")
+        try:
+            graph = load_graph(self.persist_path)
+        except ArtifactUnavailableError:
+            self.load_status = "unavailable"
+            self.load_error = "graph_artifact_unavailable"
+            return nx.MultiDiGraph()
+        except ArtifactCorruptError:
+            self.load_status = "corrupt"
+            self.load_error = "graph_artifact_corrupt"
+            print(f"Warning: Refusing corrupt graph artifact at {self.persist_path}")
+            return nx.MultiDiGraph()
+        self.load_status = "loaded"
+        self.load_error = None
+        return graph
 
     def save(self):
-        """Persist the graph to disk."""
+        """Persist the graph as bounded canonical JSON."""
         with self._lock:
-            os.makedirs(os.path.dirname(self.persist_path), exist_ok=True)
-            with open(self.persist_path, "wb") as f:
-                pickle.dump(self.graph, f)
+            save_graph(self.graph, self.persist_path)
+            self.load_status = "loaded"
+            self.load_error = None
+            self._persisted_node_count = self.graph.number_of_nodes()
+            self._persisted_edge_count = self.graph.number_of_edges()
 
     def upsert_node(self, node_id: str, label: str, properties: Dict[str, Any] = None):
         """Insert or update a node with a specific label."""

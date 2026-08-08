@@ -10,6 +10,8 @@ from typing import Any
 import requests
 from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from marketleak.ingestion.connectors.http import sanitize_error_text
+
 
 EVM_ADDRESS_RE = re.compile(r"0x[a-fA-F0-9]{40}")
 
@@ -293,7 +295,10 @@ class BlockchainAgent:
             response.raise_for_status()
             payload = response.json()
         except requests.RequestException as exc:
-            result.errors.append(f"{action} request failed for {address}: {exc}")
+            result.errors.append(
+                f"{action} request failed for {address}: "
+                f"{sanitize_error_text(exc, secrets=(self.api_key,))}"
+            )
             return []
         except ValueError as exc:
             result.errors.append(f"{action} returned invalid JSON for {address}: {exc}")
@@ -313,14 +318,18 @@ class BlockchainAgent:
         record_message = str(records or "").lower()
         if self._is_api_limit_message(message) or self._is_api_limit_message(record_message):
             raise PolygonscanRateLimitError(
-                f"{action} rate limited for {address}: {payload.get('message') or records}"
+                f"{action} rate limited for {address}: "
+                f"{sanitize_error_text(payload.get('message') or records, secrets=(self.api_key,))}"
             )
 
         if "no transactions" in message:
             return []
 
         if records:
-            result.errors.append(f"{action} returned non-success response for {address}: {payload.get('message') or records}")
+            result.errors.append(
+                f"{action} returned non-success response for {address}: "
+                f"{sanitize_error_text(payload.get('message') or records, secrets=(self.api_key,))}"
+            )
         return []
 
     @staticmethod
@@ -400,7 +409,7 @@ class BlockchainAgent:
             response.raise_for_status()
             data = response.json()
         except requests.RequestException as exc:
-            result.errors.append(f"RPC {method} failed: {exc}")
+            result.errors.append(f"RPC {method} failed: {sanitize_error_text(exc)}")
             return None
         except ValueError as exc:
             result.errors.append(f"RPC {method} returned invalid JSON: {exc}")
@@ -409,7 +418,7 @@ class BlockchainAgent:
             result.errors.append(f"RPC {method} returned malformed JSON payload: expected object, got {type(data).__name__}")
             return None
         if "error" in data:
-            result.errors.append(f"RPC {method} error: {data['error']}")
+            result.errors.append(f"RPC {method} error: {sanitize_error_text(data['error'])}")
             return None
         return data.get("result")
 

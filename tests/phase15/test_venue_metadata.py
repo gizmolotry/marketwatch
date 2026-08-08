@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -25,11 +26,17 @@ class FakeTransport:
         self.responses = list(responses)
         self.calls: list[tuple[str, str, dict[str, object], float]] = []
 
-    def request(self, method: str, url: str, *, params, timeout: float) -> HttpResponse:
+    def request(
+        self, method: str, url: str, *, params, timeout: float,
+        max_response_bytes=None, approved_addresses=None,
+    ) -> HttpResponse:
         self.calls.append((method, url, dict(params or {}), timeout))
         if not self.responses:
             raise AssertionError("collector attempted an unconfigured endpoint")
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if not response.peer_address and approved_addresses:
+            response = replace(response, peer_address=approved_addresses[0])
+        return response
 
 
 class RecordingStore(RawArtifactStore):

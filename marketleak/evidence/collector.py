@@ -11,9 +11,7 @@ import hashlib
 import html
 import json
 import re
-import urllib.error
 import urllib.parse
-import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -27,9 +25,38 @@ from marketleak.evidence.archive import EvidenceArchive, EvidenceConflictError
 from marketleak.evidence.coverage import CoverageLedger, SourceCoverageInterval
 from marketleak.evidence.normalize import NormalizedEvidence, normalize_evidence, utc_datetime
 from marketleak.ingestion.raw_store import RawArtifactStore, RawCapture
+from marketleak.ingestion.connectors.http import (
+    RequestsTransport as PinnedRequestsTransport,
+    approved_https_destination,
+    safe_request_metadata,
+    safe_response_metadata,
+    sanitize_error_text,
+    system_resolver,
+)
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
+
+
+class UnsafeSourceUrlError(ValueError):
+    """The configured or discovered URL is outside the declared public boundary."""
+
+
+def _unsafe_source_detail(exc: Exception) -> str:
+    if type(exc) is UnsafeSourceUrlError and exc.args and isinstance(exc.args[0], str):
+        return sanitize_error_text(exc.args[0])
+    return sanitize_error_text(exc)
+
+
+def _origin(value: str) -> str:
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme.casefold() != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise UnsafeSourceUrlError("source URL must use HTTPS without userinfo")
+    if parsed.port not in (None, 443):
+        raise UnsafeSourceUrlError("source URL must use the default HTTPS port")
+    hostname = parsed.hostname.casefold()
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    return f"https://{host}"
 
 
 def canonical_url(value: str, *, base_url: str | None = None) -> str:
@@ -38,6 +65,8 @@ def canonical_url(value: str, *, base_url: str | None = None) -> str:
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
         return ""
     hostname = parsed.hostname.casefold()
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
     port = parsed.port
     if port is not None and not (
         (parsed.scheme.casefold() == "http" and port == 80)
@@ -91,32 +120,40 @@ class HttpResponse:
     body: bytes
     headers: Mapping[str, str] = field(default_factory=dict)
     url: str = ""
+    oversized: bool = False
+    peer_address: str = ""
 
 
 class HttpTransport(Protocol):
-    def get(self, url: str, *, timeout: float, headers: Mapping[str, str]) -> HttpResponse: ...
+    def get(
+        self, url: str, *, timeout: float, headers: Mapping[str, str], max_response_bytes: int,
+        approved_addresses: tuple[str, ...],
+    ) -> HttpResponse: ...
 
 
 class UrllibTransport:
-    """Minimal standard-library transport; sources are never defaulted."""
+    """Compatibility transport using a TLS connection pinned to approved IPs."""
 
-    def get(self, url: str, *, timeout: float, headers: Mapping[str, str]) -> HttpResponse:
-        request = urllib.request.Request(url, headers=dict(headers), method="GET")
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                return HttpResponse(
-                    status_code=int(response.status),
-                    body=response.read(),
-                    headers=dict(response.headers.items()),
-                    url=response.geturl(),
-                )
-        except urllib.error.HTTPError as exc:
-            return HttpResponse(
-                status_code=int(exc.code),
-                body=exc.read(),
-                headers=dict(exc.headers.items()) if exc.headers is not None else {},
-                url=exc.geturl(),
-            )
+    def __init__(self) -> None:
+        self._transport = PinnedRequestsTransport()
+
+    def get(
+        self, url: str, *, timeout: float, headers: Mapping[str, str], max_response_bytes: int,
+        approved_addresses: tuple[str, ...],
+    ) -> HttpResponse:
+        response = self._transport.request(
+            "GET",
+            url,
+            params=None,
+            timeout=timeout,
+            max_response_bytes=max_response_bytes,
+            approved_addresses=approved_addresses,
+            request_headers=headers,
+        )
+        return HttpResponse(
+            response.status_code, response.body, response.headers, response.url,
+            response.oversized, response.peer_address
+        )
 
 
 class PublicSourceConfig(BaseModel):
@@ -133,15 +170,23 @@ class PublicSourceConfig(BaseModel):
     max_entries: int = Field(default=100, ge=1, le=1000)
     max_response_bytes: int = Field(default=2_000_000, ge=1024, le=10_000_000)
     headers: dict[str, str] = Field(default_factory=lambda: {"User-Agent": "MarketLeak-Evidence/1.0"})
+    pagination_allowed_origins: tuple[str, ...] = Field(default_factory=tuple, max_length=10)
     document_title: str | None = None
 
     @field_validator("url")
     @classmethod
     def _absolute_http_url(cls, value: str) -> str:
+        _origin(value)
         normalized = canonical_url(value)
         if not normalized:
-            raise ValueError("url must be an absolute HTTP(S) URL")
+            raise ValueError("url must be an absolute HTTPS URL")
+        _origin(normalized)
         return normalized
+
+    @field_validator("pagination_allowed_origins")
+    @classmethod
+    def _valid_pagination_origins(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(sorted({_origin(str(value).rstrip("/")) for value in values}))
 
     @field_validator("format")
     @classmethod
@@ -187,6 +232,7 @@ class PublicEvidenceCollector:
         coverage_ledger: CoverageLedger | None = None,
         transport: HttpTransport | None = None,
         clock: Callable[[], datetime] | None = None,
+        resolver: Callable[[str, int], Iterable[str]] | None = None,
         connector_version: str = "public-evidence-collector-v1",
     ):
         if sources is None:
@@ -201,6 +247,27 @@ class PublicEvidenceCollector:
         self.transport = transport or UrllibTransport()
         self.clock = clock or (lambda: datetime.now(UTC))
         self.connector_version = connector_version
+        self.resolver = resolver
+
+    def _validate_origin(self, url: str, source: PublicSourceConfig) -> str:
+        _origin(url)
+        normalized = canonical_url(url)
+        origin = _origin(normalized)
+        approved = {_origin(source.url), *source.pagination_allowed_origins}
+        if origin not in approved:
+            raise UnsafeSourceUrlError("source URL origin is not approved")
+        return normalized
+
+    def _approve_destination(self, url: str, source: PublicSourceConfig) -> tuple[str, tuple[str, ...]]:
+        normalized = self._validate_origin(url, source)
+        try:
+            _, addresses = approved_https_destination(
+                normalized,
+                self.resolver or system_resolver,
+            )
+        except ValueError as exc:
+            raise UnsafeSourceUrlError(str(exc)) from exc
+        return normalized, addresses
 
     def collect(self) -> CollectionBatch:
         documents: list[NormalizedEvidence] = []
@@ -235,25 +302,46 @@ class PublicEvidenceCollector:
         for page_index in range(source.max_pages):
             if not current_url or current_url in visited:
                 break
+            try:
+                current_url, approved_addresses = self._approve_destination(current_url, source)
+            except Exception as exc:
+                errors.append(f"{source.source_id} rejected unsafe source URL: {_unsafe_source_detail(exc)}")
+                break
             visited.add(current_url)
-            request_metadata = {
-                "method": "GET",
-                "url": current_url,
-                "timeout_seconds": source.timeout_seconds,
-                "page_index": page_index,
-                "headers": dict(source.headers),
-            }
+            request_metadata = safe_request_metadata(
+                method="GET",
+                url=current_url,
+                headers=source.headers,
+                timeout_seconds=source.timeout_seconds,
+                page_index=page_index,
+            )
             try:
                 response = self.transport.get(
                     current_url,
                     timeout=source.timeout_seconds,
                     headers=source.headers,
+                    max_response_bytes=source.max_response_bytes,
+                    approved_addresses=approved_addresses,
                 )
                 received_at = utc_datetime(self.clock(), field_name="received_at")
                 last_received = max(last_received, received_at)
             except Exception as exc:
                 last_received = max(last_received, utc_datetime(self.clock(), field_name="failure_received_at"))
-                errors.append(f"{source.source_id} request failed for {current_url}: {exc}")
+                errors.append(
+                    f"{source.source_id} request failed for {sanitize_error_text(current_url)}: "
+                    f"{sanitize_error_text(exc)}"
+                )
+                break
+
+            if response.oversized or len(response.body) > source.max_response_bytes:
+                errors.append(f"{source.source_id} response exceeded max_response_bytes={source.max_response_bytes}")
+                break
+            try:
+                final_url = self._validate_origin(response.url or current_url, source)
+                if not response.peer_address or response.peer_address not in approved_addresses:
+                    raise UnsafeSourceUrlError("connection peer was not an approved destination")
+            except Exception as exc:
+                errors.append(f"{source.source_id} rejected unsafe redirect: {_unsafe_source_detail(exc)}")
                 break
 
             # This capture is deliberately before status, size, content-type,
@@ -264,32 +352,32 @@ class PublicEvidenceCollector:
                 source=source.source_id,
                 request=request_metadata,
                 received_at=received_at,
-                response_metadata={
-                    "status_code": response.status_code,
-                    "headers": dict(response.headers),
-                    "final_url": response.url or current_url,
-                },
+                response_metadata=safe_response_metadata(
+                    status_code=response.status_code,
+                    url=final_url,
+                    headers=response.headers,
+                ),
             )
             captures.append(capture)
 
             if response.status_code < 200 or response.status_code >= 300:
-                errors.append(f"{source.source_id} returned HTTP {response.status_code} for {current_url}")
-                break
-            if len(response.body) > source.max_response_bytes:
                 errors.append(
-                    f"{source.source_id} response exceeded max_response_bytes={source.max_response_bytes}"
+                    f"{source.source_id} returned HTTP {response.status_code} for "
+                    f"{sanitize_error_text(current_url)}"
                 )
                 break
-
             try:
                 entries, next_url = self._parse_response(
                     source,
                     response.body,
-                    response.url or current_url,
+                    final_url,
                     response.headers,
                 )
             except Exception as exc:
-                errors.append(f"{source.source_id} parse failed for {current_url}: {exc}")
+                errors.append(
+                    f"{source.source_id} parse failed for {sanitize_error_text(current_url)}: "
+                    f"{sanitize_error_text(exc)}"
+                )
                 break
 
             remaining = source.max_entries - len(documents)
@@ -309,6 +397,13 @@ class PublicEvidenceCollector:
                 if next_url:
                     partial = True
                 break
+            if next_url:
+                try:
+                    next_url = self._validate_origin(next_url, source)
+                except Exception as exc:
+                    partial = True
+                    errors.append(f"{source.source_id} rejected unsafe pagination URL: {_unsafe_source_detail(exc)}")
+                    break
             current_url = next_url
             if next_url and page_index + 1 >= source.max_pages:
                 partial = True
@@ -330,7 +425,7 @@ class PublicEvidenceCollector:
             ended_at=ended_at,
             status=status,
             connector_version=self.connector_version,
-            scope=source.url,
+            scope=sanitize_error_text(source.url),
             details=detail,
         )
         if self.coverage_ledger is not None:
@@ -351,7 +446,8 @@ class PublicEvidenceCollector:
     ) -> tuple[list[_ParsedEntry], str]:
         if source.format == "document":
             decoded = body.decode("utf-8", errors="replace")
-            title = source.document_title or response_url
+            public_response_url = sanitize_error_text(response_url)
+            title = source.document_title or public_response_url
             modified = next(
                 (value for key, value in response_headers.items() if key.casefold() == "last-modified"),
                 None,
@@ -361,8 +457,8 @@ class PublicEvidenceCollector:
                 None,
             ) or modified
             entry = _ParsedEntry(
-                source_document_id=canonical_url(response_url) or response_url,
-                url=canonical_url(response_url),
+                source_document_id=public_response_url,
+                url=public_response_url,
                 publisher=source.publisher,
                 title=_clean_text(title),
                 body=_clean_text(decoded),
@@ -406,7 +502,7 @@ class PublicEvidenceCollector:
                     source_revision=modified_raw,
                     metadata={
                         "entry_ordinal": ordinal,
-                        "feed_url": canonical_url(response_url),
+                        "feed_url": sanitize_error_text(response_url),
                         "claimed_published_at_raw": claimed_raw,
                         "modified_at_raw": modified_raw,
                     },
@@ -488,6 +584,7 @@ __all__ = [
     "PublicEvidenceCollector",
     "PublicSourceConfig",
     "UrllibTransport",
+    "UnsafeSourceUrlError",
     "canonical_url",
     "load_source_config",
 ]

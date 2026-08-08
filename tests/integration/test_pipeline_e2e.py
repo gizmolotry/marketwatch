@@ -143,6 +143,11 @@ def test_pipeline_e2e_enriches_graph_with_polygon_blockchain_data(tmp_path):
     graph = result["graph_repo"].graph
     blockchain_result = result["blockchain_results"][0]
 
+    assert result["graph_availability"]["status"] == "unavailable"
+    assert result["graph_availability"]["empty_graph_observed"] is None
+    assert result["graph_availability"]["absence_claim_eligible"] is False
+    assert result["final_results"][0]["graph_enrichment_status"] == "unavailable_persisted_graph"
+
     assert blockchain_result.wallet_node_ids == [f"wallet:{WALLET_A.lower()}"]
     assert blockchain_result.normal_transaction_count == 1
     assert blockchain_result.token_transfer_count == 1

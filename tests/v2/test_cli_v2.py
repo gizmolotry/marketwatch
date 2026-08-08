@@ -27,10 +27,10 @@ class StubTransport:
         self.responses = list(responses)
         self.calls = []
 
-    def request(self, method, url, *, params, timeout):
+    def request(self, method, url, *, params, timeout, max_response_bytes=None, approved_addresses=None):
         self.calls.append((method, url, dict(params or {})))
         status, body = self.responses.pop(0)
-        return HttpResponse(status, body, {}, url)
+        return HttpResponse(status, body, {}, url, peer_address=approved_addresses[0])
 
 
 def test_capabilities_command_is_honest_and_offline(capsys):

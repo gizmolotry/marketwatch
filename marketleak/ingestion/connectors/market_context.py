@@ -14,9 +14,20 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 import json
+import ipaddress
+import urllib.parse
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
-from marketleak.ingestion.connectors.http import HttpResponse, HttpTransport
+from marketleak.ingestion.connectors.http import (
+    HttpResponse,
+    HttpTransport,
+    Resolver,
+    approved_https_destination,
+    safe_request_metadata,
+    safe_response_metadata,
+    safe_url,
+    system_resolver,
+)
 from marketleak.ingestion.coverage import CoverageLedger, CoverageRecord
 from marketleak.ingestion.raw_store import RawArtifactStore, RawCapture
 from marketleak.multimodal.context import MarketContext
@@ -31,8 +42,17 @@ def _utc(value: datetime, *, field: str) -> datetime:
 
 def _source_url(value: str, *, field: str) -> str:
     normalized = str(value).strip()
-    if not normalized.startswith(("https://", "http://")):
-        raise ValueError(f"{field} must be an explicit http(s) URL")
+    parsed = urllib.parse.urlsplit(normalized)
+    if parsed.scheme.casefold() != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError(f"{field} must be an explicit HTTPS URL without userinfo")
+    if parsed.port not in (None, 443):
+        raise ValueError(f"{field} must use the default HTTPS port")
+    try:
+        address = ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise ValueError(f"{field} must not target a non-public address")
     return normalized
 
 
@@ -53,6 +73,7 @@ class CollectionStatus(str, Enum):
     UNAVAILABLE_LATE = "unavailable_late"
     UNAVAILABLE_INCOMPLETE = "unavailable_incomplete"
     QUARANTINED_HASH_CONFLICT = "quarantined_hash_conflict"
+    REJECTED_UNSAFE_SOURCE = "rejected_unsafe_source"
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +119,7 @@ class RawEndpoint:
     params: Mapping[str, Any] | None = None
     expected_sha256: str | None = None
     timeout_seconds: float = 10.0
+    max_response_bytes: int = 2_000_000
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "endpoint_url", _source_url(self.endpoint_url, field="endpoint_url"))
@@ -109,6 +131,10 @@ class RawEndpoint:
         if timeout <= 0 or timeout > 60:
             raise ValueError("timeout_seconds must be in (0, 60]")
         object.__setattr__(self, "timeout_seconds", timeout)
+        maximum = int(self.max_response_bytes)
+        if maximum < 1024 or maximum > 10_000_000:
+            raise ValueError("max_response_bytes must be in [1024, 10000000]")
+        object.__setattr__(self, "max_response_bytes", maximum)
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +166,7 @@ def capture_configured_json(
     endpoint: RawEndpoint,
     received_at: datetime,
     decoder: Decoder = decode_json_object,
+    resolver: Resolver = system_resolver,
 ) -> CapturedPayload:
     """Fetch once, persist raw material, then validate hash/status and decode.
 
@@ -149,16 +176,52 @@ def capture_configured_json(
 
     timestamp = _utc(received_at, field="received_at")
     try:
+        approved_origin, approved_addresses = approved_https_destination(endpoint.endpoint_url, resolver)
         response: HttpResponse = transport.request(
             "GET",
             endpoint.endpoint_url,
             params=dict(endpoint.params or {}),
             timeout=endpoint.timeout_seconds,
+            max_response_bytes=endpoint.max_response_bytes,
+            approved_addresses=approved_addresses,
         )
     except Exception as exc:
         return CapturedPayload(
-            status=CollectionStatus.UNAVAILABLE_HTTP,
+            status=(
+                CollectionStatus.REJECTED_UNSAFE_SOURCE
+                if isinstance(exc, ValueError)
+                else CollectionStatus.UNAVAILABLE_HTTP
+            ),
             reason=f"configured endpoint could not be reached: {type(exc).__name__}",
+            capture=None,
+            payload=None,
+        )
+
+    try:
+        final_origin, _ = approved_https_destination(
+            response.url,
+            lambda _host, _port: approved_addresses,
+        )
+    except ValueError:
+        return CapturedPayload(
+            CollectionStatus.REJECTED_UNSAFE_SOURCE,
+            "configured endpoint returned an unsafe effective URL",
+            None,
+            None,
+        )
+    if final_origin != approved_origin or (
+        not response.peer_address or response.peer_address not in approved_addresses
+    ):
+        return CapturedPayload(
+            CollectionStatus.REJECTED_UNSAFE_SOURCE,
+            "configured endpoint connection did not match its approved origin and address",
+            None,
+            None,
+        )
+    if response.oversized or len(response.body) > endpoint.max_response_bytes:
+        return CapturedPayload(
+            status=CollectionStatus.UNAVAILABLE_INCOMPLETE,
+            reason=f"configured source response exceeded max_response_bytes={endpoint.max_response_bytes}",
             capture=None,
             payload=None,
         )
@@ -167,9 +230,13 @@ def capture_configured_json(
         response.body,
         platform=endpoint.platform,
         source=endpoint.policy.source_uid,
-        request={"method": "GET", "url": endpoint.endpoint_url, "params": dict(endpoint.params or {})},
+        request=safe_request_metadata(
+            method="GET", url=endpoint.endpoint_url, params=endpoint.params
+        ),
         received_at=timestamp,
-        response_metadata={"status_code": response.status_code, "url": response.url, "headers": dict(response.headers)},
+        response_metadata=safe_response_metadata(
+            status_code=response.status_code, url=response.url, headers=response.headers
+        ),
     )
     if endpoint.expected_sha256 is not None and capture.sha256 != endpoint.expected_sha256:
         return CapturedPayload(
@@ -204,7 +271,7 @@ def provenance_for_capture(*, capture: RawCapture, endpoint: RawEndpoint) -> Pro
         parser_version=endpoint.parser_version,
         content_hash=capture.sha256,
         retrieved_at=capture.received_at,
-        source_url=endpoint.endpoint_url,
+        source_url=safe_url(endpoint.endpoint_url),
     )
 
 
@@ -225,7 +292,7 @@ def coverage_for_capture(
         record_count=1 if complete else 0,
         complete=complete,
         raw_sha256=() if capture is None else (capture.sha256,),
-        filters={"endpoint_url": endpoint.endpoint_url, "source_uid": endpoint.policy.source_uid},
+        filters={"endpoint_url": safe_url(endpoint.endpoint_url), "source_uid": endpoint.policy.source_uid},
     )
 
 
@@ -259,12 +326,14 @@ class MarketContextCollector:
         sources: Sequence[MarketContextSourceConfig],
         coverage_ledger: CoverageLedger | None = None,
         decoder: Decoder = decode_json_object,
+        resolver: Resolver = system_resolver,
     ) -> None:
         self.raw_store = raw_store
         self.transport = transport
         self.sources = tuple(sources)
         self.coverage_ledger = coverage_ledger
         self.decoder = decoder
+        self.resolver = resolver
 
     def collect(self, *, market_uid: str, as_of: datetime, received_at: datetime) -> MarketContextCollectionResult:
         cutoff = _utc(as_of, field="as_of")
@@ -293,6 +362,7 @@ class MarketContextCollector:
             endpoint=configured_source.endpoint,
             received_at=timestamp,
             decoder=self.decoder,
+            resolver=self.resolver,
         )
         coverage = coverage_for_capture(
             endpoint=configured_source.endpoint,
