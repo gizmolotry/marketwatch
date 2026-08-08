@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Iterable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -43,3 +44,15 @@ class EvaluationRow(BaseModel):
             raise ValueError("detected_at cannot precede event_time")
         return self
 
+
+def unique_evaluation_rows(rows: Iterable[EvaluationRow]) -> tuple[EvaluationRow, ...]:
+    """Deduplicate identical row UIDs and reject conflicting reused identities."""
+
+    selected: dict[str, EvaluationRow] = {}
+    for row in rows:
+        previous = selected.get(row.row_uid)
+        if previous is None:
+            selected[row.row_uid] = row
+        elif previous != row:
+            raise ValueError(f"conflicting duplicate evaluation row_uid: {row.row_uid}")
+    return tuple(selected.values())

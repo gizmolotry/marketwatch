@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A historical wallet replay asks a concrete signal question: **how strongly does a documented case wallet stand out against the complete same-market population at a fixed cutoff?** The output leads with signal classification, confidence, coverage, and review priority. Final disposition belongs to a human reviewer.
+A historical wallet replay asks a concrete signal question: **how strongly does a documented case wallet stand out against the complete same-market population at a fixed cutoff?** The current output separates peer-relative signal strength and statistical support from population coverage status and coverage confidence. Neither is a fraud confidence. Final disposition belongs to a human reviewer.
 
 The two replay modes remain distinct:
 
@@ -23,7 +23,7 @@ Public Polymarket proxy wallet:
 
 The [CFTC civil complaint](https://www.cftc.gov/media/13761/EnfGannonKenVanDykeComplaint042326/download) identifies the handle "Burdensome-Mix," a masked `0x31a5...8ed9` wallet, the relevant Polymarket purchases, and the alleged chronology. The [DOJ release](https://www.justice.gov/opa/pr/us-soldier-charged-using-classified-information-profit-prediction-market-bets) provides separately timestamped legal context. Legal records and resolution outcomes do not enter the activity features.
 
-The same-market replay uses the external announcement-anchored cutoff `2026-01-03T09:20:59Z`. Its frozen capture contains 21,785 unique fills from 3,449 wallets. The result is a **high-priority signal**:
+The same-market replay uses the external announcement-anchored cutoff `2026-01-03T09:20:59Z`. Its frozen capture contains 21,785 unique fills from 3,449 wallets. Under the frozen generic thresholds, the current normalization reports **high peer-relative signal strength with sufficient statistical support and verified-complete population coverage**:
 
 - composite activity rank: **33 of 3,449**;
 - Yes-buy-notional rank: **7 of 1,339**;
@@ -33,6 +33,16 @@ The composite uses the pre-existing feature policy, exact leave-one-out peer cal
 
 The trade source does not expose the exact market publication timestamp. The earliest captured same-market trade at `2025-12-12T01:20:24Z` is retained as a documented public-existence-no-later-than bound. That bound is sufficient for this hindsight same-market comparison, while `focus_published_at` remains explicitly unmapped. Operational scoring does not use this fallback.
 
+## Replay schema migration
+
+The checked-in `wallet-case-cohort-replay-v1` report is immutable historical evidence. Version 1 used an ambiguous generic `confidence: high` field and fixed summary prose. Those bytes and their hash remain unchanged, but the version-aware reader ignores that field: it re-derives current semantics from the nested candidate classification and rank, cohort status, and population coverage record.
+
+New generation uses `wallet-case-cohort-replay-v2` and nested `wallet-cohort-ranking-v2`. It names the concepts separately as `signal_strength`, `statistical_support`, `coverage_status`, and `coverage_confidence`; it does not emit generic signal confidence. Classification, review priority, rank fields, and summary are derived from the same assessment record.
+
+Replay normalization requires exactly one nested cohort row whose pseudonymous `actor_uid` equals the top-level `candidate_actor_uid`. A missing, duplicate, or mismatched row is a typed validation failure; the reader never substitutes a sole row belonging to another wallet.
+
+Population percentiles and ranks require verified complete coverage. `partial`, `unknown`, or `unavailable` population coverage fails closed: signal classification, strength, priority, and statistical support are unavailable or abstained, and no population rank is presented. Missing coverage is never represented as low strength, zero activity, or a negative finding.
+
 ## Ethereum adapter benchmark
 
 The Wahi/Ramani address `0x1C84a6d53F8950cd06a4016E5f547a089Dd7B6Fb` remains a future generic Ethereum replay benchmark. The [SEC complaint](https://www.sec.gov/files/litigation/complaints/2022/comp-pr2022-127.pdf), [Japan FSA research report](https://www.fsa.go.jp/common/about/research/20230427/20230427_report_digitalassets.pdf), and [SEC final-judgment release](https://www.sec.gov/enforcement-litigation/litigation-releases/lr-25947) provide independently retained mapping and legal context. The current Polymarket collector does not implement this Ethereum replay.
@@ -41,7 +51,8 @@ The Wahi/Ramani address `0x1C84a6d53F8950cd06a4016E5f547a089Dd7B6Fb` remains a f
 
 Every case replay should lead with:
 
-- classification (`high`, `elevated`, `routine`, or `insufficient_data`), confidence, coverage, and review priority;
+- assessment status, classification, review priority, peer-relative `signal_strength`, and `statistical_support`;
+- population `coverage_status` and separately named `coverage_confidence`;
 - composite and interpretable component ranks;
 - cutoff and distinct event/availability clocks;
 - raw hashes, receipts, exact query scope, source watermarks, and coverage;

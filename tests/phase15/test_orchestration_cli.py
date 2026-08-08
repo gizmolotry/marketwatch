@@ -11,6 +11,7 @@ from marketleak.multimodal.event_store import EventMemoryStore
 from marketleak.multimodal.orchestration import (
     BaselinePlan,
     FeatureAssemblyInput,
+    NAIVE_BASELINE_FEATURE_SPEC_HASH,
     assess_readiness,
     build_as_of_assembly,
     train_baseline_candidate,
@@ -30,7 +31,14 @@ from marketleak.multimodal.schemas import (
 T0 = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
 
 
-def fact(*, uid: str, event_minutes: int, available_minutes: int) -> MarketStateSlice:
+def fact(
+    *,
+    uid: str,
+    event_minutes: int,
+    available_minutes: int,
+    price: str = "0.55",
+    window_start_minutes: int | None = None,
+) -> MarketStateSlice:
     source = "source:venue"
     return MarketStateSlice(
         event_uid=uid,
@@ -55,9 +63,11 @@ def fact(*, uid: str, event_minutes: int, available_minutes: int) -> MarketState
         missingness=(ModalityMissingness(modality=Modality.MARKET_STATE, status=MissingnessStatus.OBSERVED),),
         market_uid="market:btc",
         outcome_uid="outcome:btc-up",
-        window_starts_at=T0 + timedelta(minutes=event_minutes - 1),
+        window_starts_at=T0 + timedelta(
+            minutes=event_minutes - 1 if window_start_minutes is None else window_start_minutes
+        ),
         window_ends_at=T0 + timedelta(minutes=event_minutes),
-        last_trade_price=Decimal("0.55"),
+        last_trade_price=Decimal(price),
         trade_notional=Decimal("10"),
         fill_count=1,
     )
@@ -69,9 +79,10 @@ def feature(*, uid: str, event_uid: str, coverage: CoverageStatus = CoverageStat
         event_uid=event_uid,
         event_cluster_uid="cluster:btc",
         market_uid="market:btc",
+        outcome_uid="outcome:btc-up",
         platform="polymarket",
         category="crypto",
-        features={"price_change": Decimal("0.2"), "volume": Decimal("10")},
+        features={"price_change": Decimal("0.10"), "volume": Decimal("20")},
         coverage_status=coverage,
         context_complete=context,
     )
@@ -87,25 +98,88 @@ def plan() -> BaselinePlan:
 
 
 def test_as_of_assembly_excludes_future_event_and_its_features():
-    past = fact(uid="event:past", event_minutes=1, available_minutes=2)
+    past_early = fact(
+        uid="event:past-early",
+        event_minutes=2,
+        available_minutes=3,
+        price="0.45",
+        window_start_minutes=0,
+    )
+    past = fact(
+        uid="event:past",
+        event_minutes=5,
+        available_minutes=6,
+        window_start_minutes=2,
+    )
     future = fact(uid="event:future", event_minutes=30, available_minutes=31)
+    store = EventMemoryStore([future, past, past_early])
+    cutoff = T0 + timedelta(minutes=10)
+    snapshot_uid = store.snapshot_as_of(cutoff).manifest.snapshot_uid
+    past_feature = feature(uid="feature:past", event_uid="event:past").model_copy(
+        update={
+            "feature_observed_at": past.event_time,
+            "feature_available_at": past.available_at,
+            "source_fact_uids": (past_early.event_uid, past.event_uid),
+            "raw_artifact_uids": (
+                past_early.provenance.raw_artifact_uid,
+                past.provenance.raw_artifact_uid,
+            ),
+            "feature_spec_hash": NAIVE_BASELINE_FEATURE_SPEC_HASH,
+            "bound_snapshot_uid": snapshot_uid,
+            "bound_as_of": cutoff,
+        }
+    )
     assembly = build_as_of_assembly(
-        EventMemoryStore([future, past]),
-        [feature(uid="feature:past", event_uid="event:past"), feature(uid="feature:future", event_uid="event:future")],
-        as_of=T0 + timedelta(minutes=10),
+        store,
+        [past_feature, feature(uid="feature:future", event_uid="event:future")],
+        as_of=cutoff,
     )
 
     assert [row.feature.feature_uid for row in assembly.rows] == ["feature:past"]
     assert [row.feature_uid for row in assembly.excluded] == ["feature:future"]
-    assert assembly.event_snapshot.manifest.event_uids == ("event:past",)
+    assert assembly.event_snapshot.manifest.event_uids == ("event:past-early", "event:past")
 
 
 def test_label_context_and_coverage_gates_block_training():
-    observed = fact(uid="event:past", event_minutes=1, available_minutes=2)
+    early = fact(
+        uid="event:past-early",
+        event_minutes=2,
+        available_minutes=3,
+        price="0.45",
+        window_start_minutes=0,
+    )
+    observed = fact(
+        uid="event:past",
+        event_minutes=5,
+        available_minutes=6,
+        window_start_minutes=2,
+    )
+    store = EventMemoryStore([early, observed])
+    cutoff = T0 + timedelta(minutes=10)
+    snapshot_uid = store.snapshot_as_of(cutoff).manifest.snapshot_uid
+    bound_feature = feature(
+        uid="feature:past",
+        event_uid="event:past",
+        coverage=CoverageStatus.PARTIAL,
+        context=False,
+    ).model_copy(
+        update={
+            "feature_observed_at": observed.event_time,
+            "feature_available_at": observed.available_at,
+            "source_fact_uids": (early.event_uid, observed.event_uid),
+            "raw_artifact_uids": (
+                early.provenance.raw_artifact_uid,
+                observed.provenance.raw_artifact_uid,
+            ),
+            "feature_spec_hash": NAIVE_BASELINE_FEATURE_SPEC_HASH,
+            "bound_snapshot_uid": snapshot_uid,
+            "bound_as_of": cutoff,
+        }
+    )
     assembly = build_as_of_assembly(
-        EventMemoryStore([observed]),
-        [feature(uid="feature:past", event_uid="event:past", coverage=CoverageStatus.PARTIAL, context=False)],
-        as_of=T0 + timedelta(minutes=10),
+        store,
+        [bound_feature],
+        as_of=cutoff,
     )
 
     readiness = assess_readiness(assembly, plan=plan())

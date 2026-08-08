@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable
 
-from .schemas import EvaluationRow
+from .schemas import EvaluationRow, unique_evaluation_rows
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +64,7 @@ def forward_disjoint_split(
     partitions: dict[str, list[EvaluationRow]] = {
         "train": [], "validation": [], "test": [], "dropped": []
     }
-    for component in _components(list(rows)):
+    for component in _components(list(unique_evaluation_rows(rows))):
         earliest = min(row.event_time for row in component)
         latest = max(row.event_time for row in component)
         if latest < train_end:

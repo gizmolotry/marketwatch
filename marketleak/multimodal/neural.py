@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Literal
+import warnings
 
 from pydantic import Field, field_validator, model_validator
 
@@ -145,11 +146,32 @@ def architecture_manifest(spec: EventSpaceSpec) -> NeuralBundleManifest:
     )
 
 
-def require_approved_bundle(*, production: bool, approved_bundle: bool) -> None:
-    """Explicitly gate protected execution; ordinary experimentation remains local."""
+def require_verified_bundle(*, production: bool, verified_bundle: object | None = None) -> None:
+    """Keep protected execution unavailable until a verified approval exists.
 
-    if production and not approved_bundle:
-        raise BundleApprovalRequired("protected execution requires an explicitly approved bundle")
+    The current repository can hash and publish artifact manifests, but it has
+    no independently attested approval object that binds those artifacts to the
+    in-memory ``state_dict``.  Consequently no caller-supplied object, truthy
+    flag, or manifest can unlock protected execution yet.
+    """
+
+    del verified_bundle
+    if production:
+        raise BundleApprovalRequired(
+            "protected neural execution is unavailable: no verified approval object binds "
+            "the in-memory state_dict, model specification, and calibration artifacts"
+        )
+
+
+def require_approved_bundle(*, production: bool, approved_bundle: object | None = None) -> None:
+    """Deprecated compatibility wrapper; a boolean never establishes approval."""
+
+    warnings.warn(
+        "require_approved_bundle is deprecated; protected execution requires a verified artifact-bound approval",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    require_verified_bundle(production=production, verified_bundle=approved_bundle)
 
 
 @dataclass(frozen=True)
@@ -261,9 +283,19 @@ if TORCH_AVAILABLE:
             evidence_mask: Tensor,
             onchain_mask: Tensor,
             production: bool = False,
-            approved_bundle: bool = False,
+            verified_bundle: object | None = None,
+            approved_bundle: object | None = None,
         ) -> EventSpaceOutput:
-            require_approved_bundle(production=production, approved_bundle=approved_bundle)
+            if approved_bundle is not None:
+                warnings.warn(
+                    "approved_bundle is deprecated and cannot unlock protected execution",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            require_verified_bundle(
+                production=production,
+                verified_bundle=verified_bundle if verified_bundle is not None else approved_bundle,
+            )
             batch_size, market_mask, evidence_mask, onchain_mask = self._validate_masks(
                 market_mask=market_mask,
                 evidence_mask=evidence_mask,
@@ -334,4 +366,5 @@ __all__ = [
     "architecture_manifest",
     "neural_status",
     "require_approved_bundle",
+    "require_verified_bundle",
 ]

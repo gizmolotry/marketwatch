@@ -18,6 +18,7 @@ from marketleak.forensics.wallet_case_cohort import (
     EVENT_CUTOFF,
     WalletCaseCohortReplayError,
     build_wallet_case_cohort_replay,
+    normalized_wallet_case_signal_assessment,
 )
 from marketleak.ingestion.normalize import canonical_json_bytes
 from hashlib import sha256
@@ -34,13 +35,15 @@ TAIL = Path(
 )
 
 
-def test_checked_in_cohort_report_leads_with_the_historical_signal() -> None:
+def test_checked_in_v1_cohort_report_is_read_with_current_unambiguous_semantics() -> None:
     payload = json.loads(REPORT.read_text(encoding="utf-8"))
 
     unsigned = dict(payload)
     report_hash = unsigned.pop("report_sha256")
     assert sha256(canonical_json_bytes(unsigned)).hexdigest() == report_hash
 
+    # The immutable file is historical v1 evidence.  Its ambiguous generic
+    # confidence field is not a current signal-confidence contract.
     assert payload["schema_version"] == "wallet-case-cohort-replay-v1"
     assert payload["replay_mode"] == "hindsight_reconstructed"
     assert payload["training_eligible"] is False
@@ -59,16 +62,17 @@ def test_checked_in_cohort_report_leads_with_the_historical_signal() -> None:
     assert payload["descriptive_ranks"]["focus_outcome_buy_notional"]["population_size"] == 1339
     assert payload["descriptive_ranks"]["gross_market_notional"]["rank"] == 32
     assert payload["descriptive_ranks"]["gross_market_notional"]["population_size"] == 3449
-    assert payload["signal_assessment"] == {
+    assert normalized_wallet_case_signal_assessment(payload) == {
+        "status": "available",
         "classification": "high",
         "review_priority": "high",
-        "confidence": "high",
-        "coverage": "complete_same_market_population",
-        "composite_population_rank": 33,
-        "composite_population_size": 3449,
-        "focus_yes_buy_notional_rank": payload["descriptive_ranks"]["focus_outcome_buy_notional"],
-        "gross_market_notional_rank": payload["descriptive_ranks"]["gross_market_notional"],
-        "summary": "High-priority wallet activity signal in the frozen same-market cohort.",
+        "signal_strength": "high",
+        "statistical_support": "sufficient",
+        "coverage_status": "complete",
+        "coverage_confidence": "verified_complete",
+        "population_rank": 33,
+        "population_size": 3449,
+        "summary": "High peer-relative signal strength with sufficient statistical support in the declared cohort.",
         "decision_owner": "human_reviewer",
     }
     assert payload["cohort_ranking"]["prospective_eligible"] is False
@@ -148,7 +152,6 @@ def test_checked_in_cohort_report_leads_with_the_historical_signal() -> None:
     assert candidate["status"] == "available"
     assert candidate["abstention_reasons"] == []
     assert candidate["signal_classification"] == "high"
-    assert candidate["review_priority"] == "high"
     assert "scores_are_probabilities" not in candidate
     assert all("is_misconduct_probability" not in item for item in candidate["feature_surprises"])
     assert candidate["population_rank"] == 33
@@ -157,6 +160,75 @@ def test_checked_in_cohort_report_leads_with_the_historical_signal() -> None:
     assert candidate["novelty_composite"] is not None
     assert candidate["operational_review_rank"] is None
     assert candidate["statistical_rank"] == 1
+
+
+def test_v2_normalization_recomputes_derived_fields_and_fails_closed_on_partial_population() -> None:
+    historical = json.loads(REPORT.read_text(encoding="utf-8"))
+    payload = json.loads(json.dumps(historical))
+    payload["schema_version"] = "wallet-case-cohort-replay-v2"
+    payload["signal_assessment"] = {
+        "status": "available",
+        "classification": "routine",
+        "review_priority": "routine",
+        "signal_strength": "routine",
+        "statistical_support": "sufficient",
+        "coverage_status": "partial",
+        "coverage_confidence": "limited",
+        "population_rank": 1,
+        "population_size": 1,
+        "summary": "caller supplied and not authoritative",
+        "decision_owner": "human_reviewer",
+    }
+    candidate = payload["cohort_ranking"]["rows"][0]
+    normalized = normalized_wallet_case_signal_assessment(payload)
+    assert normalized["classification"] == "high"
+    assert normalized["signal_strength"] == "high"
+    assert normalized["coverage_status"] == "complete"
+    assert normalized["coverage_confidence"] == "verified_complete"
+    assert normalized["population_rank"] == 33
+    assert normalized["population_size"] == 3449
+
+    payload["signal_assessment"].pop("coverage_status")
+    without_derived_coverage = normalized_wallet_case_signal_assessment(payload)
+    assert without_derived_coverage == normalized
+
+    candidate["signal_classification"] = "routine"
+    normalized = normalized_wallet_case_signal_assessment(payload)
+    assert normalized["classification"] == "routine"
+    assert normalized["review_priority"] == "routine"
+    assert normalized["signal_strength"] == "routine"
+    assert normalized["population_rank"] == 33
+    assert normalized["population_size"] == 3449
+    assert normalized["summary"].startswith("Routine peer-relative signal strength")
+
+    payload["cohort_ranking"]["coverage"]["status"] = "partial"
+    payload["population"]["coverage"]["status"] = "partial"
+    candidate["signal_classification"] = "high"
+    normalized = normalized_wallet_case_signal_assessment(payload)
+    assert normalized["status"] == "abstain"
+    assert normalized["classification"] == "unavailable"
+    assert normalized["review_priority"] == "unavailable"
+    assert normalized["signal_strength"] == "unavailable"
+    assert normalized["statistical_support"] == "unavailable"
+    assert normalized["coverage_status"] == "partial"
+    assert normalized["coverage_confidence"] == "limited"
+    assert normalized["population_rank"] is None
+    assert normalized["population_size"] is None
+
+
+def test_replay_normalization_requires_an_exact_candidate_row_for_v1_and_v2() -> None:
+    historical = json.loads(REPORT.read_text(encoding="utf-8"))
+
+    v1_mismatch = json.loads(json.dumps(historical))
+    v1_mismatch["candidate_actor_uid"] = "polymarket:wallet/0xwrong"
+    with pytest.raises(WalletCaseCohortReplayError, match="exactly one row matching candidate_actor_uid"):
+        normalized_wallet_case_signal_assessment(v1_mismatch)
+
+    v2_wrong_sole_row = json.loads(json.dumps(historical))
+    v2_wrong_sole_row["schema_version"] = "wallet-case-cohort-replay-v2"
+    v2_wrong_sole_row["cohort_ranking"]["rows"][0]["actor_uid"] = "polymarket:wallet/0xwrong"
+    with pytest.raises(WalletCaseCohortReplayError, match="exactly one row matching candidate_actor_uid"):
+        normalized_wallet_case_signal_assessment(v2_wrong_sole_row)
 
 
 @pytest.mark.skipif(not (HEAD.is_dir() and TAIL.is_dir()), reason="frozen local raw deliveries are unavailable")
@@ -183,7 +255,25 @@ def test_real_captured_deliveries_regenerate_the_checked_in_cohort_report() -> N
     assert candidate.population_size == 3449
     assert candidate.hindsight_peer_rank == 33
     assert replay.report.prospective_eligible is False
-    assert replay.canonical_bytes() == REPORT.read_bytes()
+    generated = replay.to_payload()
+    assert generated["schema_version"] == "wallet-case-cohort-replay-v2"
+    assert generated["supersedes_schema_version"] == "wallet-case-cohort-replay-v1"
+    assessment = generated["signal_assessment"]
+    assert assessment["classification"] == candidate.signal_classification
+    assert assessment["review_priority"] == candidate.signal_classification
+    assert assessment["signal_strength"] == candidate.signal_classification
+    assert assessment["statistical_support"] == "sufficient"
+    assert assessment["coverage_status"] == "complete"
+    assert assessment["coverage_confidence"] == "verified_complete"
+    assert "confidence" not in assessment
+    assert "High-priority" not in assessment["summary"]
+
+    historical = json.loads(REPORT.read_text(encoding="utf-8"))
+    assert normalized_wallet_case_signal_assessment(historical) == {
+        key: value
+        for key, value in assessment.items()
+        if key not in {"focus_yes_buy_notional_rank", "gross_market_notional_rank"}
+    }
 
 
 @pytest.mark.skipif(not HEAD.is_dir(), reason="frozen local raw deliveries are unavailable")

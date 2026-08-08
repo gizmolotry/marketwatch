@@ -111,12 +111,42 @@ Feature: Point-in-time Polymarket signal-to-wallet collection
       And the exact market publication timestamp is unmapped
       But captured same-market trades prove public existence no later than "2025-12-12T01:20:24Z"
       When the historical wallet case is replayed with frozen generic top-1-percent and top-5-percent signal thresholds
-      Then the output leads with classification "high", confidence "high", coverage "complete_same_market_population", and review priority "high"
+      Then the v2 output leads with classification "high", signal strength "high", statistical support "sufficient", coverage status "complete", coverage confidence "verified_complete", and review priority "high"
+      And it emits no generic signal confidence or fraud confidence
       And it reports composite population rank 33 of 3449
       And it prominently reports Yes-buy-notional rank 7 of 1339 and gross-market-notional rank 32 of 3449
       And it retains the exact publication timestamp as unmapped while recording the observed public-existence upper bound
       And it labels the replay "hindsight_reconstructed" because availability followed the cutoff
       And final disposition is assigned to "human_reviewer"
+
+    @causality @historical_case @coverage @abstention
+    Scenario: Refuse population signal claims when historical cohort coverage is partial
+      Given a wallet case payload claims classification "high" and statistical support "sufficient"
+      But the authoritative same-market population coverage status is "partial"
+      When the version-aware wallet case normalizer derives the current assessment
+      Then assessment status is "abstain"
+      And classification, signal strength, review priority, and statistical support are "unavailable"
+      And coverage status is "partial" with coverage confidence "limited"
+      And population rank and population size are unavailable
+      And missing population coverage is not represented as low strength, zero activity, or a negative finding
+
+    @causality @historical_case @migration
+    Scenario: Normalize immutable v1 replay output without trusting ambiguous confidence
+      Given an immutable hash-verified "wallet-case-cohort-replay-v1" payload
+      And its generic confidence field is "high"
+      When the version-aware wallet case normalizer derives the current assessment
+      Then it ignores the generic v1 confidence field
+      And it derives signal strength and statistical support from the nested candidate row
+      And it derives coverage status and coverage confidence from the nested population coverage record
+      And the immutable v1 payload bytes and hash remain unchanged
+
+    @causality @historical_case @identity_boundary @abstention
+    Scenario: Refuse a replay whose candidate does not match its nested cohort row
+      Given a v1 or v2 wallet case replay declares candidate actor UID "wallet-a"
+      But its sole nested cohort row belongs to pseudonymous actor UID "wallet-b"
+      When the version-aware wallet case normalizer derives the current assessment
+      Then it raises a typed replay validation error
+      And it does not attribute the nested classification, priority, or population rank to "wallet-a"
 
     @selection @determinism
     Scenario: Select a bounded top-K set of participating wallets deterministically
@@ -206,7 +236,8 @@ Feature: Point-in-time Polymarket signal-to-wallet collection
       Given a wallet snapshot has sufficient declared coverage and feature history
       And a case-retrieval query returns procedurally labeled, mapping-grade-filtered comparable episodes
       When the system produces an analyst-facing wallet packet
-      Then it reports signal classification, confidence, coverage, market-activity context, case resemblance, and review priority
+      Then it reports signal classification, signal strength, statistical support, coverage status, coverage confidence, market-activity context, case resemblance, and review priority
+      And it reports neither generic signal confidence nor fraud confidence
       And retrieved cases retain their source, procedural status, mapping grade, and independent case-cluster identifiers
       And a human reviewer owns final disposition
       And insufficient coverage, history, provenance, or restraint support returns classification "insufficient_data"

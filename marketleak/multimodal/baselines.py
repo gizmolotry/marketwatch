@@ -163,8 +163,9 @@ class _OneVsRestIsotonicCalibrator:
             [np.asarray(self._models[name].predict(support[:, index]), dtype=float) for index, name in enumerate(self.classes)]
         )
         totals = calibrated.sum(axis=1, keepdims=True)
-        # Do not fabricate a class when every calibrated support is zero.
-        return np.divide(calibrated, totals, out=support.copy(), where=totals > 0.0)
+        if not np.isfinite(calibrated).all() or np.any(totals <= 0.0):
+            raise ValueError("all_calibrated_support_zero")
+        return calibrated / totals
 
 
 class MarketMechanismBaseline:
@@ -254,6 +255,7 @@ class MarketMechanismBaseline:
         raw_support = np.asarray(model.predict_proba(calibration_x), dtype=float)
         try:
             calibrator = _OneVsRestIsotonicCalibrator(classes).fit(raw_support, [str(label) for label in calibration_labels])
+            calibrator.transform(raw_support)
         except ValueError as exc:
             self.status = BaselineStatus(BaselineAvailability.UNAVAILABLE, f"calibration_unavailable:{exc}", *counts, mechanisms)
             return self.status
@@ -282,7 +284,16 @@ class MarketMechanismBaseline:
                 feature_spec=self._feature_spec,
                 algorithm=self.algorithm,
             )
-        support = self._calibrator.transform(np.asarray(self._model.predict_proba(vector), dtype=float))[0]
+        try:
+            support = self._calibrator.transform(np.asarray(self._model.predict_proba(vector), dtype=float))[0]
+        except ValueError as exc:
+            return MechanismPrediction(
+                availability=BaselineAvailability.UNAVAILABLE,
+                reason=f"calibration_unavailable:{exc}",
+                ranked_mechanisms=(),
+                feature_spec=self._feature_spec,
+                algorithm=self.algorithm,
+            )
         ranked = tuple(
             MechanismSupport(mechanism=name, support=float(value))
             for name, value in sorted(zip(self._classes, support, strict=True), key=lambda pair: (-pair[1], pair[0]))

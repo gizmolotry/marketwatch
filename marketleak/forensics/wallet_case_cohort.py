@@ -28,6 +28,7 @@ from marketleak.actors import (
     WalletCohortPolicy,
     rank_wallet_cohort,
 )
+from marketleak.actors.wallet_cohort import WalletSignalAssessment
 from marketleak.domain import CoverageStatus, TradeFill, TradeSide
 from marketleak.ingestion.connectors.polymarket import PolymarketConnector
 from marketleak.ingestion.normalize import canonical_json_bytes
@@ -255,6 +256,105 @@ def _descriptive_rank(values: Mapping[str, Decimal], candidate: str) -> dict[str
     }
 
 
+def normalized_wallet_case_signal_assessment(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Read v1/v2 replay output into the current unambiguous assessment.
+
+    Historical v1 ``confidence`` is intentionally ignored.  It did not name
+    whether it described source coverage or statistical signal support and
+    must not be reinterpreted as either one (and never as fraud confidence).
+    """
+
+    schema_version = payload.get("schema_version")
+    if schema_version not in {"wallet-case-cohort-replay-v1", "wallet-case-cohort-replay-v2"}:
+        raise WalletCaseCohortReplayError("unsupported wallet case cohort replay schema")
+    raw_assessment = payload.get("signal_assessment")
+    if not isinstance(raw_assessment, Mapping):
+        raise WalletCaseCohortReplayError("wallet case cohort replay signal_assessment is missing")
+    cohort = payload.get("cohort_ranking")
+    if not isinstance(cohort, Mapping):
+        raise WalletCaseCohortReplayError("wallet case cohort replay cohort_ranking is missing")
+
+    def coverage_value(value: object) -> CoverageStatus:
+        return {
+            "complete": CoverageStatus.COMPLETE,
+            "complete_same_market_population": CoverageStatus.COMPLETE,
+            "partial": CoverageStatus.PARTIAL,
+            "unavailable": CoverageStatus.UNAVAILABLE,
+            "unknown": CoverageStatus.UNKNOWN,
+        }.get(value, CoverageStatus.UNKNOWN)
+
+    cohort_coverage = cohort.get("coverage")
+    authoritative_coverage = coverage_value(
+        cohort_coverage.get("status") if isinstance(cohort_coverage, Mapping) else None
+    )
+    population = payload.get("population")
+    population_coverage = population.get("coverage") if isinstance(population, Mapping) else None
+    population_status = coverage_value(
+        population_coverage.get("status") if isinstance(population_coverage, Mapping) else None
+    )
+    # Top-level assessment coverage is derived output in both schemas.  It is
+    # never an authority: v1's ambiguous field is ignored, and v2 is rebuilt
+    # exclusively from the nested cohort and population coverage records.
+    coverage_states = (authoritative_coverage, population_status)
+    if CoverageStatus.UNAVAILABLE in coverage_states:
+        coverage_status = CoverageStatus.UNAVAILABLE
+    elif CoverageStatus.UNKNOWN in coverage_states:
+        coverage_status = CoverageStatus.UNKNOWN
+    elif CoverageStatus.PARTIAL in coverage_states:
+        coverage_status = CoverageStatus.PARTIAL
+    else:
+        coverage_status = CoverageStatus.COMPLETE
+
+    rows = cohort.get("rows")
+    candidate_uid = payload.get("candidate_actor_uid")
+    if not isinstance(candidate_uid, str) or not candidate_uid.strip():
+        raise WalletCaseCohortReplayError("wallet case cohort replay candidate_actor_uid is missing")
+    matching_rows = (
+        [
+            item
+            for item in rows
+            if isinstance(item, Mapping) and item.get("actor_uid") == candidate_uid
+        ]
+        if isinstance(rows, list)
+        else []
+    )
+    if len(matching_rows) != 1:
+        raise WalletCaseCohortReplayError(
+            "wallet case cohort replay requires exactly one row matching candidate_actor_uid"
+        )
+    candidate_row = matching_rows[0]
+    raw_classification = candidate_row.get("signal_classification")
+    classification = (
+        raw_classification
+        if raw_classification in {"high", "elevated", "routine", "insufficient_data"}
+        else "insufficient_data"
+    )
+    population_rank = candidate_row.get("population_rank")
+    population_size = candidate_row.get("population_size")
+    rank_valid = (
+        isinstance(population_rank, int)
+        and not isinstance(population_rank, bool)
+        and isinstance(population_size, int)
+        and not isinstance(population_size, bool)
+        and 1 <= population_rank <= population_size
+    )
+    available = (
+        cohort.get("status") == "available"
+        and candidate_row.get("status") == "available"
+        and classification != "insufficient_data"
+        and rank_valid
+    )
+    normalized = WalletSignalAssessment.derive_values(
+        report_status="available" if available else "abstain",
+        row_status="available" if available else "abstain",
+        signal_classification=classification,
+        coverage_status=coverage_status,
+        population_rank=population_rank if rank_valid else None,
+        population_size=population_size if rank_valid else None,
+    )
+    return normalized.to_payload()
+
+
 @dataclass(frozen=True, slots=True)
 class WalletCaseCohortReplay:
     report: CohortRankingReport
@@ -273,22 +373,14 @@ class WalletCaseCohortReplay:
         return hashlib.sha256(canonical_json_bytes(self._unsigned_payload())).hexdigest()
 
     def _unsigned_payload(self) -> dict[str, Any]:
-        candidate = next(
-            item for item in self.report.rows if item.actor_uid == CANDIDATE_ACTOR_UID
-        )
+        assessment = self.report.assessment_for(CANDIDATE_ACTOR_UID).to_payload()
         return {
-            "schema_version": "wallet-case-cohort-replay-v1",
+            "schema_version": "wallet-case-cohort-replay-v2",
+            "supersedes_schema_version": "wallet-case-cohort-replay-v1",
             "signal_assessment": {
-                "classification": candidate.signal_classification,
-                "review_priority": candidate.signal_classification,
-                "confidence": "high",
-                "coverage": "complete_same_market_population",
-                "composite_population_rank": candidate.population_rank,
-                "composite_population_size": candidate.population_size,
+                **assessment,
                 "focus_yes_buy_notional_rank": dict(self.focus_outcome_buy_notional_rank),
                 "gross_market_notional_rank": dict(self.gross_market_notional_rank),
-                "summary": "High-priority wallet activity signal in the frozen same-market cohort.",
-                "decision_owner": "human_reviewer",
             },
             "case_uid": "wallet-case:cftc-doj-van-dyke-burdensome-mix-2026",
             "replay_mode": "hindsight_reconstructed",
