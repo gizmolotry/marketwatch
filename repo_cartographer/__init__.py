@@ -9,7 +9,16 @@ from .domain import *
 from .domain import __all__ as _domain_all
 from .render import RenderResult, write_inventory
 from .verify import VerificationResult, verify_inventory
-from .test_receipts import RECEIPT_FORMAT, declaration_key, run_pytest_receipt, verify_test_receipt
+from .test_receipts import (
+    ATTESTATION_ALGORITHM,
+    LEGACY_RECEIPT_FORMAT,
+    RECEIPT_FORMAT,
+    ReceiptAttestationSigner,
+    VerifiedTestReceipt,
+    declaration_key,
+    run_pytest_receipt,
+    verify_test_receipt,
+)
 from .test_runner_config import PytestRunnerConfig, load_pytest_runner_config, runner_config_from_dict
 
 __all__ = [
@@ -34,6 +43,10 @@ __all__ = [
     "write_inventory",
     "write_curated_map",
     "RECEIPT_FORMAT",
+    "LEGACY_RECEIPT_FORMAT",
+    "ATTESTATION_ALGORITHM",
+    "ReceiptAttestationSigner",
+    "VerifiedTestReceipt",
     "declaration_key",
     "run_pytest_receipt",
     "verify_test_receipt",

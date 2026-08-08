@@ -1,6 +1,8 @@
 {
-  "format": "repo-cartographer-pytest-runner/v1",
+  "format": "repo-cartographer-pytest-runner/v2",
   "allowed_test_paths": ["tests/cartographer"],
   "timeout_seconds": 300,
-  "max_output_bytes": 1048576
+  "max_output_bytes": 1048576,
+  "max_source_files": 10000,
+  "max_source_bytes": 268435456
 }

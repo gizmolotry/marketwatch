@@ -84,21 +84,27 @@ Feature: Evidence-first repository capability inventory
 
   @implemented @test_receipt @pytest @frozen_copy
   Scenario: Execute only approved inventoried pytest declarations
-    Given a verified inventory and a strict bounded pytest runner policy
+    Given a verified inventory, a strict checked-in pytest runner v2 policy, and an operator-held attestation key
     When an operator runs approved test UIDs or test paths
+    Then the cartographer rejects an excessive eligible source-file count or aggregate source byte size before copying or execution
     Then the cartographer hash-checks eligible source files into a temporary frozen copy
-    And it invokes the current interpreter and pytest without a shell, plugin autoload, inherited pytest options, or arbitrary arguments
-    And it records native collection, setup, call, teardown, skip, xfail, exit, and mutation facts without raw output or environment secrets
-    And it atomically emits a hash-bound receipt for a completed passing or failing run when possible
+    And it invokes the current interpreter and pytest with a fixed repository root and without a shell, plugin autoload, inherited pytest options, or arbitrary arguments
+    And a timeout terminates the whole isolated process tree
+    And it records bounded native collection and definition locations, setup, call, teardown, skip, xfail, exit, and mutation facts without raw output or environment secrets
+    And event overflow emits a bounded explicit non-promotable record
+    And it atomically emits an HMAC-SHA256-attested v2 receipt for a completed passing or failing run when possible
 
   @implemented @test_receipt @verification @fail_closed
   Scenario: Promote only completely passed mapped test declarations
-    Given a verified pytest receipt bound to the exact inventory and runner policy
+    Given a verified v2 pytest receipt bound to the exact inventory, an approved checked-in runner policy, and a trusted external attestation key
     When a curated capability has an explicit required exact test-capability selector
+    Then each collected repository path, definition line, and original name must map one-to-one to the exact inventoried declaration and node ID
     Then every collected parameter case for every mapped non-fixture declaration must pass setup, call, and teardown plainly
-    And skip, xfail, xpass, failure, error, collection failure, nonzero exit, unmapped selection, timeout, or mutation prevents promotion
+    And ambiguity, duplicate identity, shadowing, dynamic node rewriting, skip, xfail, xpass, failure, error, collection failure, nonzero exit, unmapped selection, timeout, or mutation prevents promotion
     And a selected receipt never promotes an unselected declaration or an optional selector
     And receipt evidence can change only the verification axis
+    And the curated map binds the consumed runner-policy and receipt hashes
+    And a self-hash, unknown policy, absent resolver, bad signature, or legacy v1 receipt never promotes
     And a static map without receipts remains declaration-only
 
   @target_design @not_current @tree_sitter

@@ -24,7 +24,7 @@ The experimental neural shell has its own ID. It must not be merged with trained
 1. Scan and verify a deliberate Git/dirty-worktree state.
 2. Project that inventory with the checked-in profile.
 3. Use `map-explain` on the capability selected for the next slice.
-4. Implement and run the separately authorized verification work.
+4. Run separately authorized verification with the checked-in pytest runner v2 policy and an operator/CI-held attestation key.
 5. Rescan, reproject, and use `map-diff` with the same profile hash.
 
 A profile edit changes the question, not the repository's implementation. Consequently, `map-diff` rejects profile-hash mismatch. Review taxonomy changes separately, generate both maps again under the accepted profile, and only then compare repository progress.
@@ -32,5 +32,7 @@ A profile edit changes the question, not the repository's implementation. Conseq
 ## Selector boundary
 
 Selectors are exact and reviewable. Semantic similarity may eventually propose selector candidates, but it cannot enter this projection path or promote a state. Required misses are useful output: they identify a declared gap instead of disappearing. Optional matches appear in explanations but cannot upgrade the capability.
+
+Executed-test promotion additionally requires a v2 receipt whose HMAC-SHA256 `key_id` resolves to a trusted external key and whose exact runner-policy hash resolves to an explicitly approved checked-in configuration. The map binds every consumed policy hash and receipt hash. A self-hash, unknown policy, missing key resolver, bad signature, or legacy v1 receipt cannot promote `verification`.
 
 No aggregate completion percentage is calculated. The independent axes are the decision surface; collapsing them would recreate the ambiguity this subsystem was built to remove.

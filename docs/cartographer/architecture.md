@@ -33,7 +33,7 @@ Implemented boundaries:
 - The standalone CLI exposes `scan`, `verify`, and output-only `explain` commands over canonical JSONL, a root-hash manifest, and a bounded summary.
 - A separate curated projection consumes only a verified rendered inventory and the strict `repo-cartographer-curated-profile/v1` profile. It maps exact selectors into stable, human-scale MarketLeak capability IDs while retaining the seven independent axes.
 - Curated maps bind the semantic profile SHA-256 and source inventory root SHA-256, are written canonically and atomically, and can be explained or diffed by stable ID. Profile changes are rejected from repository-progress diffs.
-- Executed pytest evidence is a separate immutable receipt overlay. It runs only by explicit command against a hash-checked temporary frozen copy; static scan output and low-level inventory formats remain unchanged.
+- Executed pytest evidence is a separate immutable receipt overlay. It runs only by explicit command against a policy-bounded, hash-checked temporary frozen copy and emits externally HMAC-attested v2 receipts; static scan output and low-level inventory formats remain unchanged.
 
 The MVP does not yet provide a database, daemon, web dashboard, runtime probe, parser beyond Python/Gherkin, language-server index, semantic index, agent ledger, or automatic capability approval. Static scanning never executes tests. A separate explicit bounded `run-tests` adapter executes approved inventoried pytest declarations in a hash-checked frozen copy and emits a receipt overlay. “Verify” means bounded static/hash/manifest and referential verification; “explain” returns the supporting/refuting evidence and reason codes already held in rendered inventory output.
 
@@ -55,7 +55,7 @@ The raw inventory is deliberately symbol-level and therefore too granular to be 
 
 This layer does not use fuzzy or semantic matching. A profile edit and a repository edit are different events: changing the taxonomy changes the profile hash; changing repository evidence changes the source inventory root. See [curated-marketleak-map.md](curated-marketleak-map.md).
 
-Receipt-aware projection is described in [test-receipts.md](test-receipts.md). Receipt hashes are included only when receipts are supplied, preserving no-receipt map serialization.
+Receipt-aware projection is described in [test-receipts.md](test-receipts.md). Receipt and approved runner-policy hashes are included only when receipts are supplied, preserving no-receipt map serialization. A canonical self-hash is integrity evidence only; promotion requires the exact approved runner policy and a trusted external v2 attestation.
 
 ## Future adapters and indexes
 

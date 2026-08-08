@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python 3.11 and Cartographer
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install frozen Python dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Compile Python sources
+        run: python -m compileall -q marketleak repo_cartographer tests
+
+      - name: Run the full test suite
+        run: python -m pytest -q --basetemp "${RUNNER_TEMP}/pytest-marketleak-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Verify a fresh static Cartographer inventory
+        run: |
+          python -m repo_cartographer scan \
+            --root "${GITHUB_WORKSPACE}" \
+            --config "${GITHUB_WORKSPACE}/configs/cartographer/default.json" \
+            --output "${RUNNER_TEMP}/cartographer-inventory" \
+            --no-include-untracked
+          python -m repo_cartographer verify \
+            --inventory "${RUNNER_TEMP}/cartographer-inventory"
+
+      - name: Record the verification boundary
+        run: |
+          echo "Cartographer static inventory verification passed." >> "${GITHUB_STEP_SUMMARY}"
+          echo "This CI result does not attest, approve, or promote an executed-test receipt." >> "${GITHUB_STEP_SUMMARY}"
+
+  trusted-cartographer-provenance:
+    name: Trusted Cartographer provenance
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact trusted main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Confirm the trusted revision
+        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+
+      - name: Install the pinned receipt-runner dependencies
+        run: python -m pip install --disable-pip-version-check pytest==9.0.2 jsonschema==4.25.1
+
+      - name: Require the protected receipt HMAC key
+        env:
+          CARTOGRAPHER_RECEIPT_HMAC_KEY: ${{ secrets.CARTOGRAPHER_RECEIPT_HMAC_KEY }}
+        run: |
+          if [ -z "${CARTOGRAPHER_RECEIPT_HMAC_KEY:-}" ]; then
+            echo "::error::provenance_unavailable: CARTOGRAPHER_RECEIPT_HMAC_KEY is missing or empty"
+            exit 1
+          fi
+
+      - name: Create and verify the trusted static inventory
+        run: |
+          mkdir -p "${RUNNER_TEMP}/cartographer-provenance"
+          python -m repo_cartographer scan \
+            --root "${GITHUB_WORKSPACE}" \
+            --config "${GITHUB_WORKSPACE}/configs/cartographer/default.json" \
+            --output "${RUNNER_TEMP}/cartographer-provenance/inventory" \
+            --no-include-untracked
+          python -m repo_cartographer verify \
+            --inventory "${RUNNER_TEMP}/cartographer-provenance/inventory"
+
+      - name: Run, verify, and project the signed receipt
+        env:
+          CARTOGRAPHER_RECEIPT_HMAC_KEY: ${{ secrets.CARTOGRAPHER_RECEIPT_HMAC_KEY }}
+        run: |
+          python -m repo_cartographer run-tests \
+            --root "${GITHUB_WORKSPACE}" \
+            --inventory "${RUNNER_TEMP}/cartographer-provenance/inventory" \
+            --config "${GITHUB_WORKSPACE}/configs/cartographer/pytest-runner.json" \
+            --output "${RUNNER_TEMP}/cartographer-provenance/cartographer-tests.receipt.json" \
+            --test-path tests/cartographer \
+            --attestation-key-id github-main-v1 \
+            --attestation-key-env CARTOGRAPHER_RECEIPT_HMAC_KEY
+          python -m repo_cartographer verify-receipt \
+            --receipt "${RUNNER_TEMP}/cartographer-provenance/cartographer-tests.receipt.json" \
+            --inventory "${RUNNER_TEMP}/cartographer-provenance/inventory" \
+            --config "${GITHUB_WORKSPACE}/configs/cartographer/pytest-runner.json" \
+            --trusted-key-id github-main-v1 \
+            --trusted-key-env CARTOGRAPHER_RECEIPT_HMAC_KEY
+          python -c "import json, os, pathlib; receipt = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) / 'cartographer-provenance' / 'cartographer-tests.receipt.json').read_text(encoding='utf-8')); assert receipt['results']['promotable'] is True, 'signed receipt is valid but non-promotable'; assert receipt['attestation']['key_id'] == 'github-main-v1'"
+          python -m repo_cartographer map \
+            --inventory "${RUNNER_TEMP}/cartographer-provenance/inventory" \
+            --profile "${GITHUB_WORKSPACE}/configs/cartographer/marketleak-capabilities.json" \
+            --test-receipt "${RUNNER_TEMP}/cartographer-provenance/cartographer-tests.receipt.json" \
+            --approved-runner-config "${GITHUB_WORKSPACE}/configs/cartographer/pytest-runner.json" \
+            --trusted-key-id github-main-v1 \
+            --trusted-key-env CARTOGRAPHER_RECEIPT_HMAC_KEY \
+            --output "${RUNNER_TEMP}/cartographer-provenance/marketleak-map.json"
+
+      - name: Upload the verified provenance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cartographer-provenance-${{ github.sha }}
+          path: ${{ runner.temp }}/cartographer-provenance
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,14 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "title":"Repo Cartographer bounded pytest runner policy v2",
+  "type":"object","additionalProperties":false,
+  "required":["format","allowed_test_paths","timeout_seconds","max_output_bytes","max_source_files","max_source_bytes"],
+  "properties":{
+    "format":{"const":"repo-cartographer-pytest-runner/v2"},
+    "allowed_test_paths":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string","minLength":1}},
+    "timeout_seconds":{"type":"integer","minimum":1,"maximum":3600},
+    "max_output_bytes":{"type":"integer","minimum":1024,"maximum":10000000},
+    "max_source_files":{"type":"integer","minimum":1,"maximum":1000000},
+    "max_source_bytes":{"type":"integer","minimum":1024,"maximum":100000000000}
+  }
+}
