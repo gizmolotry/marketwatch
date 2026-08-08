@@ -1,6 +1,6 @@
 # CI trust and provenance boundary
 
-The ordinary `python` job in the [CI workflow](../../.github/workflows/ci.yml) runs engineering checks for `pull_request` and `push` events. It inherits only `contents: read`, receives no repository secrets, and disables checkout credential persistence. It installs the exact versions in `requirements.txt`, compiles the Python trees, runs the full test suite with `--basetemp` under the runner's external temporary directory, and creates and verifies a fresh static Cartographer inventory.
+The ordinary `python` job in the [CI workflow](../../.github/workflows/ci.yml) runs engineering checks for every `pull_request` and for pushes to `main`. Feature-branch pushes are not a second trigger because the pull-request event already tests those revisions. The job inherits only `contents: read`, receives no repository secrets, and disables checkout credential persistence. It installs the exact versions in `requirements.txt`, compiles the Python trees, runs the full test suite with `--basetemp` under the runner's external temporary directory, and creates and verifies a fresh static Cartographer inventory.
 
 UI CI is explicitly unavailable at present. Although `ui/package-lock.json` exists, a clean `npm ci` rejects it as inconsistent with `ui/package.json`. The ordinary workflow must not replace that deterministic check with a mutable `npm install`. Restore the UI build job only after the dependency declaration and lockfile are intentionally synchronized and `npm ci && npm run build` succeeds.
 
