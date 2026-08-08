@@ -66,6 +66,8 @@ demo_data/market_dump.csv
 # Generated reports and application output
 output/
 reports/
+/inventory.jsonl/
+/map.json
 
 # Local test, browser, notebook, and coverage output
 .pytest-*/
