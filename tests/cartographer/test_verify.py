@@ -25,6 +25,7 @@ def _scan(tmp_path):
     _git(root, "config", "user.name", "Cartographer Fixture")
     _git(root, "config", "user.email", "fixture@example.invalid")
     (root / "worker.py").write_text("def work():\n    return 'bounded'\n", encoding="utf-8")
+    (root / "README.md").write_text("Verifier ordering mechanics fixture.\n", encoding="utf-8")
     _git(root, "add", ".")
     _git(root, "commit", "-m", "fixture repository")
     output = tmp_path / "inventory"
@@ -63,6 +64,7 @@ def test_verify_rejects_noncanonical_jsonl_even_if_manifest_hashes_are_not_consu
     _, output, _ = _scan(tmp_path)
     path = output / "files.jsonl"
     records = path.read_text(encoding="utf-8").splitlines()
+    assert len(records) >= 2
     path.write_text("\n".join(reversed(records)) + "\n", encoding="utf-8")
 
     result = verify_inventory(output)

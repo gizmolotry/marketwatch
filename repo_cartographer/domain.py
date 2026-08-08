@@ -650,6 +650,7 @@ class CuratedCapabilityMap:
     source_snapshot_uid: str
     capabilities: tuple[CuratedCapabilityFact, ...]
     test_receipt_sha256s: tuple[str, ...] = ()
+    test_runner_policy_sha256s: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.format != "repo-cartographer-curated-map/v1":
@@ -669,6 +670,13 @@ class CuratedCapabilityMap:
             self,
             "test_receipt_sha256s",
             tuple(sorted({_sha(value, "test_receipt_sha256s") for value in self.test_receipt_sha256s})),
+        )
+        if not isinstance(self.test_runner_policy_sha256s, tuple):
+            raise TypeError("test_runner_policy_sha256s must be a tuple")
+        object.__setattr__(
+            self,
+            "test_runner_policy_sha256s",
+            tuple(sorted({_sha(value, "test_runner_policy_sha256s") for value in self.test_runner_policy_sha256s})),
         )
 
     @property

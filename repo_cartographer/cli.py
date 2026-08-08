@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -22,13 +23,35 @@ from .render import MANIFEST_NAME, load_jsonl, write_inventory
 from .snapshot import SnapshotError, snapshot_repository
 from .status import derive_capabilities, derive_components
 from .verify import verify_inventory
-from .test_receipts import run_pytest_receipt, verify_test_receipt
+from .test_receipts import ReceiptAttestationSigner, run_pytest_receipt, verify_test_receipt
 from .test_runner_config import load_pytest_runner_config
 
 
 EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_USAGE = 2
+
+
+def _read_attestation_key(key_file: Path | None, key_env: str | None) -> bytes:
+    if (key_file is None) == (key_env is None):
+        raise ValueError("choose exactly one attestation key file or environment variable")
+    if key_file is not None:
+        try:
+            return key_file.read_bytes()
+        except OSError as exc:
+            raise ValueError("attestation key file is unreadable") from exc
+    value = os.environ.get(str(key_env))
+    if value is None:
+        raise ValueError("attestation key environment variable is unavailable")
+    return value.encode("utf-8")
+
+
+def _add_key_source(parser: argparse.ArgumentParser, *, trusted: bool, required: bool) -> None:
+    prefix = "trusted" if trusted else "attestation"
+    parser.add_argument(f"--{prefix}-key-id", required=required)
+    group = parser.add_mutually_exclusive_group(required=required)
+    group.add_argument(f"--{prefix}-key-file", type=Path)
+    group.add_argument(f"--{prefix}-key-env")
 
 
 def scan_repository(
@@ -164,6 +187,8 @@ def _parser() -> argparse.ArgumentParser:
     map_command.add_argument("--profile", type=Path, required=True)
     map_command.add_argument("--output", type=Path, required=True)
     map_command.add_argument("--test-receipt", type=Path, action="append", default=[])
+    map_command.add_argument("--approved-runner-config", type=Path, action="append", default=[])
+    _add_key_source(map_command, trusted=True, required=False)
 
     map_explain = commands.add_parser("map-explain", help="explain one stable capability in a curated map")
     map_explain.add_argument("--map", dest="map_path", type=Path, required=True)
@@ -180,11 +205,14 @@ def _parser() -> argparse.ArgumentParser:
     run_tests.add_argument("--output", type=Path, required=True)
     run_tests.add_argument("--test-uid", action="append", default=[])
     run_tests.add_argument("--test-path", action="append", default=[])
+    _add_key_source(run_tests, trusted=False, required=True)
 
     verify_receipt = commands.add_parser("verify-receipt", help="verify an immutable pytest receipt against its inventory")
     verify_receipt.add_argument("--receipt", type=Path, required=True)
     verify_receipt.add_argument("--inventory", type=Path, required=True)
     verify_receipt.add_argument("--config", type=Path)
+    verify_receipt.add_argument("--legacy-integrity-only", action="store_true")
+    _add_key_source(verify_receipt, trusted=True, required=False)
     return parser
 
 
@@ -218,7 +246,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             return EXIT_OK
         if args.command == "map":
             profile = load_curated_profile(args.profile)
-            mapped = project_curated_map(args.inventory, profile, test_receipts=args.test_receipt)
+            trusted_keys = None
+            if args.trusted_key_id or args.trusted_key_file or args.trusted_key_env:
+                trusted_keys = {
+                    args.trusted_key_id: _read_attestation_key(args.trusted_key_file, args.trusted_key_env),
+                }
+            mapped = project_curated_map(
+                args.inventory,
+                profile,
+                test_receipts=args.test_receipt,
+                approved_runner_configs=tuple(load_pytest_runner_config(path) for path in args.approved_runner_config),
+                trusted_attestation_keys=trusted_keys,
+            )
             map_sha256 = write_curated_map(mapped, args.output)
             print(json.dumps({
                 "capability_count": len(mapped.capabilities),
@@ -227,6 +266,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "profile_sha256": mapped.profile_sha256,
                 "source_inventory_root_sha256": mapped.source_inventory_root_sha256,
                 "test_receipt_sha256s": mapped.test_receipt_sha256s,
+                "test_runner_policy_sha256s": mapped.test_runner_policy_sha256s,
             }, sort_keys=True))
             return EXIT_OK
         if args.command == "map-explain":
@@ -236,11 +276,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             sys.stdout.buffer.write(canonical_json_bytes(diff_curated_maps(args.before, args.after)) + b"\n")
             return EXIT_OK
         if args.command == "run-tests":
+            signer = ReceiptAttestationSigner(
+                args.attestation_key_id,
+                _read_attestation_key(args.attestation_key_file, args.attestation_key_env),
+            )
             receipt = run_pytest_receipt(
                 args.inventory,
                 load_pytest_runner_config(args.config),
                 args.output,
                 repository_root=args.root,
+                attestation_signer=signer,
                 test_uids=args.test_uid,
                 test_paths=args.test_path,
             )
@@ -249,12 +294,31 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "output": str(args.output.resolve()),
                 "promotable": receipt["results"]["promotable"],
                 "receipt_sha256": receipt["receipt_sha256"],
+                "attestation_key_id": receipt["attestation"]["key_id"],
             }, sort_keys=True))
             return EXIT_OK
         if args.command == "verify-receipt":
             config = load_pytest_runner_config(args.config) if args.config else None
-            receipt = verify_test_receipt(args.receipt, args.inventory, config)
-            print(json.dumps({"ok": True, "promotable": receipt["results"]["promotable"], "receipt_sha256": receipt["receipt_sha256"]}, sort_keys=True))
+            trusted_keys = None
+            if args.trusted_key_id or args.trusted_key_file or args.trusted_key_env:
+                trusted_keys = {
+                    args.trusted_key_id: _read_attestation_key(args.trusted_key_file, args.trusted_key_env),
+                }
+            receipt = verify_test_receipt(
+                args.receipt,
+                args.inventory,
+                config,
+                trusted_keys,
+                allow_legacy_v1=args.legacy_integrity_only,
+            )
+            print(json.dumps({
+                "attestation_trusted": receipt.attestation_trusted,
+                "integrity_verified": receipt.integrity_verified,
+                "legacy_v1": receipt.legacy_v1,
+                "ok": True,
+                "promotion_authorized": receipt.promotion_authorized,
+                "receipt_sha256": receipt["receipt_sha256"],
+            }, sort_keys=True))
             return EXIT_OK
     except (OSError, RuntimeError, TypeError, ValueError, LookupError) as exc:
         print(f"repo-cartographer: {exc}", file=sys.stderr)

@@ -120,10 +120,23 @@ def test_raw_capture_and_receipt_happen_before_json_parsing(tmp_path, monkeypatc
 class PathLike:
     @staticmethod
     def exists(uri: str) -> bool:
+        import os
         from pathlib import Path
         from urllib.parse import urlparse, unquote
 
-        return Path(unquote(urlparse(uri).path.lstrip("/"))).exists() if uri.startswith("file:///") else False
+        parsed = urlparse(uri)
+        if parsed.scheme.lower() != "file":
+            return False
+        # RawArtifactStore emits local file URIs.  Do not make a test helper
+        # probe a remote/UNC authority when given an unexpected URI.
+        if parsed.netloc not in {"", "localhost"}:
+            return False
+        path = unquote(parsed.path)
+        # pathlib on Windows expects ``C:/...`` rather than ``/C:/...``.
+        # POSIX paths must retain their leading slash to remain absolute.
+        if os.name == "nt" and len(path) >= 3 and path[0] == "/" and path[1].isalpha() and path[2] == ":":
+            path = path[1:]
+        return Path(path).exists()
 
 
 def test_confirmed_transaction_pagination_stops_at_configured_bound(tmp_path):

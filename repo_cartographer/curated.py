@@ -27,8 +27,9 @@ from .domain import (
     VerificationState,
 )
 from .render import MANIFEST_NAME, load_jsonl
+from .test_runner_config import PytestRunnerConfig
 from .verify import verify_inventory
-from .test_receipts import declaration_key, verify_test_receipt
+from .test_receipts import LEGACY_RECEIPT_FORMAT, declaration_key, verify_test_receipt
 
 
 CURATED_MAP_FORMAT = "repo-cartographer-curated-map/v1"
@@ -145,6 +146,8 @@ def project_curated_map(
     profile: CuratedProfile,
     *,
     test_receipts: Iterable[str | Path] = (),
+    approved_runner_configs: Iterable[PytestRunnerConfig] = (),
+    trusted_attestation_keys: Mapping[str, bytes] | None = None,
 ) -> CuratedCapabilityMap:
     """Project exact selectors over a verified rendered inventory."""
 
@@ -164,12 +167,39 @@ def project_curated_map(
     scenarios = load_jsonl(root / "scenarios.jsonl")
     artifacts = load_jsonl(root / "artifacts.jsonl")
     files_by_uid = {str(row["file_uid"]): row for row in load_jsonl(root / "files.jsonl")}
+    approved_configs: dict[str, PytestRunnerConfig] = {}
+    for config in approved_runner_configs:
+        if not isinstance(config, PytestRunnerConfig):
+            raise TypeError("approved_runner_configs must contain PytestRunnerConfig values")
+        approved_configs[config.sha256] = config
     receipt_hashes: list[str] = []
+    runner_policy_hashes: list[str] = []
     passed_declaration_keys: set[str] = set()
     for receipt_path in test_receipts:
-        receipt = verify_test_receipt(receipt_path, root)
+        try:
+            untrusted_header = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"test receipt is unreadable: {exc}") from exc
+        if not isinstance(untrusted_header, Mapping):
+            raise ValueError("test receipt root must be an object")
+        untrusted_runner = untrusted_header.get("runner")
+        if not isinstance(untrusted_runner, Mapping):
+            raise ValueError("test receipt runner policy binding is invalid")
+        runner_policy_sha256 = untrusted_runner.get("config_sha256")
+        approved_config = approved_configs.get(runner_policy_sha256)
+        if approved_config is None:
+            raise ValueError("test receipt runner config is not an approved checked-in policy")
+        legacy_v1 = untrusted_header.get("format") == LEGACY_RECEIPT_FORMAT
+        receipt = verify_test_receipt(
+            receipt_path,
+            root,
+            approved_config,
+            trusted_attestation_keys,
+            allow_legacy_v1=legacy_v1,
+        )
         receipt_hashes.append(receipt["receipt_sha256"])
-        if receipt.get("results", {}).get("promotable"):
+        runner_policy_hashes.append(approved_config.sha256)
+        if receipt.promotion_authorized:
             passed_declaration_keys.update(
                 row["declaration_key"]
                 for row in receipt.get("results", {}).get("cases", [])
@@ -258,6 +288,7 @@ def project_curated_map(
         source_snapshot_uid=snapshot["snapshot_uid"],
         capabilities=tuple(sorted(projected, key=lambda item: item.capability_id)),
         test_receipt_sha256s=tuple(receipt_hashes),
+        test_runner_policy_sha256s=tuple(runner_policy_hashes),
     )
 
 
@@ -281,6 +312,8 @@ def write_curated_map(value: CuratedCapabilityMap, path: str | Path) -> str:
     base = asdict(value)
     if not base.get("test_receipt_sha256s"):
         base.pop("test_receipt_sha256s", None)
+    if not base.get("test_runner_policy_sha256s"):
+        base.pop("test_runner_policy_sha256s", None)
     digest = canonical_sha256(base)
     _atomic_write(target, canonical_json_bytes({**base, "map_sha256": digest}) + b"\n")
     return digest
@@ -320,6 +353,7 @@ def explain_curated_map(path: str | Path, capability_id: str) -> dict[str, Any]:
         "source_inventory_root_sha256": payload["source_inventory_root_sha256"],
         "source_snapshot_uid": payload["source_snapshot_uid"],
         "test_receipt_sha256s": payload.get("test_receipt_sha256s", []),
+        "test_runner_policy_sha256s": payload.get("test_runner_policy_sha256s", []),
     }
 
 

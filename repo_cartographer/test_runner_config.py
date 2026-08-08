@@ -16,9 +16,11 @@ class PytestRunnerConfig:
     allowed_test_paths: tuple[str, ...]
     timeout_seconds: int
     max_output_bytes: int
+    max_source_files: int
+    max_source_bytes: int
 
     def __post_init__(self) -> None:
-        if self.format != "repo-cartographer-pytest-runner/v1":
+        if self.format != "repo-cartographer-pytest-runner/v2":
             raise ValueError("unsupported pytest runner config format")
         if not isinstance(self.allowed_test_paths, tuple) or not self.allowed_test_paths:
             raise ValueError("allowed_test_paths must be a non-empty array")
@@ -27,6 +29,10 @@ class PytestRunnerConfig:
             raise ValueError("timeout_seconds must be an integer from 1 through 3600")
         if not isinstance(self.max_output_bytes, int) or isinstance(self.max_output_bytes, bool) or not 1024 <= self.max_output_bytes <= 10_000_000:
             raise ValueError("max_output_bytes must be an integer from 1024 through 10000000")
+        if not isinstance(self.max_source_files, int) or isinstance(self.max_source_files, bool) or not 1 <= self.max_source_files <= 1_000_000:
+            raise ValueError("max_source_files must be an integer from 1 through 1000000")
+        if not isinstance(self.max_source_bytes, int) or isinstance(self.max_source_bytes, bool) or not 1024 <= self.max_source_bytes <= 100_000_000_000:
+            raise ValueError("max_source_bytes must be an integer from 1024 through 100000000000")
 
     @property
     def sha256(self) -> str:
@@ -36,13 +42,27 @@ class PytestRunnerConfig:
 def runner_config_from_dict(value: Mapping[str, Any]) -> PytestRunnerConfig:
     if not isinstance(value, Mapping):
         raise ValueError("pytest runner config must be an object")
-    expected = {"format", "allowed_test_paths", "timeout_seconds", "max_output_bytes"}
+    expected = {
+        "format",
+        "allowed_test_paths",
+        "timeout_seconds",
+        "max_output_bytes",
+        "max_source_files",
+        "max_source_bytes",
+    }
     if set(value) != expected:
         raise ValueError("pytest runner config keys are invalid")
     paths = value["allowed_test_paths"]
     if not isinstance(paths, list) or any(not isinstance(item, str) for item in paths):
         raise ValueError("allowed_test_paths must be an array of strings")
-    return PytestRunnerConfig(value["format"], tuple(paths), value["timeout_seconds"], value["max_output_bytes"])
+    return PytestRunnerConfig(
+        value["format"],
+        tuple(paths),
+        value["timeout_seconds"],
+        value["max_output_bytes"],
+        value["max_source_files"],
+        value["max_source_bytes"],
+    )
 
 
 def load_pytest_runner_config(path: str | Path) -> PytestRunnerConfig:
