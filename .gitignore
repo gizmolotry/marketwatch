@@ -61,6 +61,7 @@ demo_data/raw_evidence/
 demo_data/onchain_ticks/
 demo_data/cache_*
 demo_data/*.pkl
+demo_data/graph.json
 demo_data/market_dump.csv
 
 # Generated reports and application output

@@ -4,11 +4,23 @@ from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
+from marketleak.graph.safe_persistence import SafePersistenceError, load_cluster_map
+
 # Ensure environment is loaded
 load_dotenv()
 
 # Initialize the Slack App with the Bot Token
 app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
+CLUSTER_CACHE = "demo_data/cache_clusters.json"
+
+
+def load_wallet_cluster_map(path: str = CLUSTER_CACHE) -> dict[str, str]:
+    """Load only the bounded canonical JSON cluster artifact.
+
+    Legacy pickle caches are intentionally ignored and never deserialized.
+    """
+
+    return load_cluster_map(path)
 
 @app.event("app_mention")
 def handle_app_mention_events(body, say):
@@ -95,14 +107,14 @@ def handle_proxy_map(ack, respond, command):
         return
         
     try:
-        import pickle
-        cache_path = "demo_data/cache_clusters.pkl"
+        cache_path = CLUSTER_CACHE
         if not os.path.exists(cache_path):
-            respond("Cluster cache not built yet. Please run master_daemon.py.")
+            legacy_path = os.path.splitext(cache_path)[0] + ".pkl"
+            suffix = " Legacy pickle cache ignored." if os.path.exists(legacy_path) else ""
+            respond(f"Cluster cache not built yet. Please run master_daemon.py.{suffix}")
             return
-            
-        with open(cache_path, "rb") as f:
-            proxies = pickle.load(f)
+
+        proxies = load_wallet_cluster_map(cache_path)
         
         # Check if wallet is in the proxy map
         # Normalize wallet address removing 'wallet:' if needed
@@ -117,8 +129,10 @@ def handle_proxy_map(ack, respond, command):
         else:
             respond(f"✅ Wallet `{clean_wallet}` does not appear to be part of a known proxy ring based on current funding overlap.")
             
-    except Exception as e:
-        respond(f"Error checking proxy map: {str(e)}")
+    except SafePersistenceError:
+        respond("Proxy map is unavailable because its cache is missing, corrupt, or unsupported.")
+    except Exception:
+        respond("Error checking proxy map.")
 
 if __name__ == "__main__":
     app_token = os.environ.get("SLACK_APP_TOKEN")

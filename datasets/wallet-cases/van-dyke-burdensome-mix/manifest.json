@@ -39,8 +39,8 @@
     },
     {
       "path": "coverage/ledger.jsonl",
-      "byte_length": 440,
-      "sha256": "7deea086972389aad2d8761fc765740aa0d0daca93ed675dda57bff68b8a23f2"
+      "byte_length": 439,
+      "sha256": "fe2c5fd47992942e4f159cfbace9f33c8a609a9dd83eaf82922477ef902eacbb"
     },
     {
       "path": "fills.jsonl",

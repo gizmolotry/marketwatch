@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -36,10 +37,12 @@ class SequenceTransport:
     def __init__(self, *responses):
         self.responses = list(responses)
 
-    def get(self, url, *, timeout, headers):
+    def get(self, url, *, timeout, headers, max_response_bytes, approved_addresses):
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
+        if not response.peer_address:
+            response = replace(response, peer_address=approved_addresses[0])
         return response
 
 
@@ -79,6 +82,7 @@ def _collector(root, *, archive, ledger, transport, clock):
         coverage_ledger=ledger,
         transport=transport,
         clock=clock,
+        resolver=lambda _host, _port: ("93.184.216.34",),
     )
 
 
@@ -155,7 +159,7 @@ def test_failed_attempt_persists_hash_verified_coverage_gap(tmp_path):
 
     assert result.coverage[0].status == CoverageStatus.UNAVAILABLE
     assert restarted.verify()[0].status == CoverageStatus.UNAVAILABLE
-    assert "timed out" in restarted.intervals[0].details
+    assert "TimeoutError" in restarted.intervals[0].details
     assert restarted.tail_hash != "0" * 64
 
 
@@ -247,4 +251,3 @@ def test_direct_script_exists_and_selects_the_explicit_command():
     script = Path("scripts/collect_evidence_v2.py").read_text(encoding="utf-8")
     assert '"collect-evidence-once"' in script
     assert "sys.argv[1:]" in script
-

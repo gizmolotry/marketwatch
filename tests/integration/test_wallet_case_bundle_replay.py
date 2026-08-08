@@ -30,7 +30,7 @@ def test_frozen_van_dyke_bundle_replays_exact_hindsight_metrics_and_hashes() -> 
         "polymarket:wallet-replay-query/"
         "5fe7fa2a0956d3d3dfb6b473b1e8e68b6c8a4a311fc46f85ee0c8efda8e9d48e"
     )
-    assert bundle.coverage_sha256 == "7deea086972389aad2d8761fc765740aa0d0daca93ed675dda57bff68b8a23f2"
+    assert bundle.coverage_sha256 == "fe2c5fd47992942e4f159cfbace9f33c8a609a9dd83eaf82922477ef902eacbb"
     assert bundle.fills_sha256 == "2249a1b29ee32b776a76e569876184c84a3f7b740d3e84e2d3b45ff841fdb558"
     assert bundle.coverage.raw_sha256 == (
         "9eac0ab947a8591575a96343eb4ee9141ee572986f425e34b98d353381460d70",

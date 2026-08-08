@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Awaitable, Callable, Mapping, Protocol, runtime_checkable
+from urllib.parse import urlsplit
 
 from marketleak.domain import (
     ActorVisibility,
@@ -45,6 +46,9 @@ from .models import IngestionBatch
 KALSHI_WEBSOCKET_URL = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
 """Documented production endpoint; never contacted by this module implicitly."""
 
+_KALSHI_WEBSOCKET_HOST = "external-api-ws.kalshi.com"
+_KALSHI_WEBSOCKET_PATH = "/trade-api/ws/v2"
+
 _AUTH_HEADER_NAMES = (
     "KALSHI-ACCESS-KEY",
     "KALSHI-ACCESS-SIGNATURE",
@@ -57,6 +61,10 @@ _ALLOWED_CHANNELS = frozenset(
 
 class KalshiWebSocketAuthenticationError(ValueError):
     """Raised before connection when the required server-side handshake is absent."""
+
+
+class KalshiWebSocketConfigurationError(ValueError):
+    """Raised when credentials could be routed outside the approved endpoint."""
 
 
 class KalshiWebSocketProtocolError(ValueError):
@@ -134,12 +142,40 @@ class KalshiWebSocketConfig:
         unsupported = set(channels) - _ALLOWED_CHANNELS
         if unsupported:
             raise ValueError(f"unsupported Kalshi WebSocket channels: {sorted(unsupported)}")
+        websocket_url = require_text(self.websocket_url, "websocket_url")
+        self._validate_websocket_url(websocket_url)
         object.__setattr__(self, "market_tickers", tickers)
         object.__setattr__(self, "channels", channels)
-        object.__setattr__(self, "websocket_url", require_text(self.websocket_url, "websocket_url"))
+        object.__setattr__(self, "websocket_url", websocket_url)
         # Copy rather than retain a mutable environment/config mapping.  The
         # values intentionally remain private to the connector instance.
         object.__setattr__(self, "auth_headers", dict(self.auth_headers))
+
+    @staticmethod
+    def _validate_websocket_url(websocket_url: str) -> None:
+        """Fail closed before credentials can be read or handed to a transport."""
+
+        try:
+            parsed = urlsplit(websocket_url)
+            port = parsed.port
+        except ValueError as exc:
+            raise KalshiWebSocketConfigurationError(
+                "invalid Kalshi WebSocket endpoint"
+            ) from exc
+        if (
+            parsed.scheme != "wss"
+            or parsed.hostname != _KALSHI_WEBSOCKET_HOST
+            or port is not None
+            or parsed.path != _KALSHI_WEBSOCKET_PATH
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or websocket_url != KALSHI_WEBSOCKET_URL
+        ):
+            raise KalshiWebSocketConfigurationError(
+                "Kalshi WebSocket endpoint must exactly match the approved production endpoint"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,6 +357,9 @@ class KalshiWebSocketCollector:
 
         if max_messages < 1:
             raise ValueError("max_messages must be positive")
+        # Revalidate at the credential boundary as defense in depth for config
+        # objects restored or mutated outside their normal constructor.
+        self.config._validate_websocket_url(self.config.websocket_url)
         headers = self._authenticated_headers()
         quality = DataQualityReport(source="kalshi:websocket-market-data")
         result = KalshiWsCollection(

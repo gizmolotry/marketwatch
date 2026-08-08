@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
-from marketleak.agents.blockchain_agent import BlockchainAgent
+import requests
+
+from marketleak.agents.blockchain_agent import BlockchainAgent, BlockchainEnrichmentResult
 from marketleak.graph.repository import GraphRepository
 
 
@@ -112,3 +114,24 @@ def test_blockchain_agent_adds_polygon_wallet_transactions_and_edges():
 
     paths = repo.find_evidence_paths(f"wallet:{WALLET_A.lower()}", ["Event"])
     assert any(path == [f"wallet:{WALLET_A.lower()}", "event:market-1"] for path, _ in paths)
+
+
+class SecretEchoingSession:
+    def get(self, url, params=None, timeout=None):
+        raise requests.RequestException(
+            f"request rejected at {url}?apikey={params['apikey']}&signature=signed-value"
+        )
+
+
+def test_blockchain_agent_never_exposes_api_or_signed_query_secrets_in_errors():
+    api_key = "etherscan-live-secret"
+    agent = BlockchainAgent(api_key=api_key, session=SecretEchoingSession())
+    result = BlockchainEnrichmentResult(market_uid="market-1", event_node_id="event:market-1")
+
+    records = agent._fetch_account_records_once("txlist", WALLET_A, result)
+
+    assert records == []
+    rendered = " ".join(result.errors)
+    assert api_key not in rendered
+    assert "signed-value" not in rendered
+    assert rendered.endswith("<RequestException>")

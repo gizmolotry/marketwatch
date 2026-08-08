@@ -1,4 +1,7 @@
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
+
+import pytest
 
 from marketleak.domain import CoverageStatus
 from marketleak.evidence.archive import EvidenceArchive
@@ -36,11 +39,18 @@ class SequenceTransport:
         self.items = list(items)
         self.requests = []
 
-    def get(self, url, *, timeout, headers):
-        self.requests.append({"url": url, "timeout": timeout, "headers": dict(headers)})
+    def get(self, url, *, timeout, headers, max_response_bytes, approved_addresses):
+        self.requests.append({
+            "url": url,
+            "timeout": timeout,
+            "headers": dict(headers),
+            "approved_addresses": approved_addresses,
+        })
         item = self.items.pop(0)
         if isinstance(item, Exception):
             raise item
+        if not item.peer_address:
+            item = replace(item, peer_address=approved_addresses[0])
         return item
 
 
@@ -93,7 +103,7 @@ def test_raw_response_is_captured_before_parser_failure(tmp_path):
     assert store.read(result.raw_captures[0].sha256) == malformed
     assert store.verify(result.raw_captures[0]) is True
     receipt = store.read_receipt(result.raw_captures[0])
-    assert receipt["request"]["url"] == "https://example.test/feed.xml"
+    assert receipt["request"]["url"] == "https://example.test"
     assert receipt["response_metadata"]["status_code"] == 200
     assert "parse failed" in result.errors[0]
     assert result.coverage[0].status == CoverageStatus.UNAVAILABLE
@@ -187,7 +197,7 @@ def test_transport_failure_records_explicit_coverage_gap(tmp_path):
     assert result.documents == ()
     assert result.raw_captures == ()
     assert result.coverage[0].status == CoverageStatus.UNAVAILABLE
-    assert "timed out" in result.coverage[0].details
+    assert "TimeoutError" in result.coverage[0].details
 
 
 def test_archive_cutoff_excludes_documents_not_yet_locally_observed(tmp_path):
@@ -211,3 +221,191 @@ def test_archive_cutoff_excludes_documents_not_yet_locally_observed(tmp_path):
 def test_example_config_declares_no_undocumented_default_source():
     sources = load_source_config("configs/evidence/sources.example.json")
     assert sources == ()
+
+
+def test_receipt_and_errors_redact_request_and_response_secrets(tmp_path):
+    secret = "live-secret-value"
+    source = PublicSourceConfig(
+        source_id="example-wire",
+        url=f"https://example.test/feed.xml?signature={secret}&page=1",
+        format="rss",
+        publisher="Example Wire",
+        headers={
+            "User-Agent": "MarketLeak-Test/1",
+            "Authorization": f"Bearer {secret}",
+            "Cookie": f"session={secret}",
+        },
+    )
+    response = HttpResponse(
+        200,
+        b"<rss><broken>",
+        {"Content-Type": "application/rss+xml", "Set-Cookie": f"session={secret}"},
+        source.url,
+    )
+    store = RawArtifactStore(tmp_path / "raw")
+    result = PublicEvidenceCollector(
+        sources=[source],
+        raw_store=store,
+        archive=EvidenceArchive(),
+        transport=SequenceTransport(response),
+        clock=SequenceClock(T0, T0 + timedelta(seconds=1)),
+    ).collect()
+
+    receipt = store.read_receipt(result.raw_captures[0])
+    serialized = str(receipt)
+    assert secret not in serialized
+    assert secret not in " ".join(result.errors)
+    assert receipt["request"]["headers"] == {"user-agent": "MarketLeak-Test/1"}
+    assert receipt["request"]["secrets_redacted"] is True
+    assert "set-cookie" not in receipt["response_metadata"]["headers"]
+    assert receipt["response_metadata"]["secrets_redacted"] is True
+
+
+def test_private_destination_is_rejected_before_transport_or_capture(tmp_path):
+    transport = SequenceTransport(_response(_rss()))
+    result = PublicEvidenceCollector(
+        sources=[_source()],
+        raw_store=RawArtifactStore(tmp_path / "raw"),
+        archive=EvidenceArchive(),
+        transport=transport,
+        resolver=lambda _host, _port: ("127.0.0.1",),
+        clock=SequenceClock(T0),
+    ).collect()
+
+    assert transport.requests == []
+    assert result.raw_captures == ()
+    assert "non-public destination" in result.errors[0]
+
+
+def test_cross_origin_redirect_is_rejected_without_capturing_followed_body(tmp_path):
+    response = HttpResponse(200, _rss(), {}, "https://attacker.test/stolen")
+    result = PublicEvidenceCollector(
+        sources=[_source()],
+        raw_store=RawArtifactStore(tmp_path / "raw"),
+        archive=EvidenceArchive(),
+        transport=SequenceTransport(response),
+        resolver=lambda _host, _port: ("93.184.216.34",),
+        clock=SequenceClock(T0, T0 + timedelta(seconds=1)),
+    ).collect()
+
+    assert result.raw_captures == ()
+    assert "unsafe redirect" in result.errors[0]
+
+
+def test_cross_origin_pagination_is_rejected_after_first_raw_capture(tmp_path):
+    body = b"""<rss xmlns:atom="http://www.w3.org/2005/Atom"><channel>
+    <atom:link rel="next" href="https://attacker.test/page-2" />
+    <item><guid>one</guid><title>One</title><description>First page.</description></item>
+    </channel></rss>"""
+    source = _source().model_copy(update={"max_pages": 2})
+    transport = SequenceTransport(_response(body))
+    result = PublicEvidenceCollector(
+        sources=[source],
+        raw_store=RawArtifactStore(tmp_path / "raw"),
+        archive=EvidenceArchive(),
+        transport=transport,
+        resolver=lambda _host, _port: ("93.184.216.34",),
+        clock=SequenceClock(T0, T0 + timedelta(seconds=1)),
+    ).collect()
+
+    assert len(transport.requests) == 1
+    assert len(result.raw_captures) == 1
+    assert "unsafe pagination URL" in result.errors[0]
+
+
+def test_oversized_response_is_not_durably_captured(tmp_path):
+    source = _source().model_copy(update={"max_response_bytes": 1024})
+    response = HttpResponse(200, b"", {}, source.url, oversized=True)
+    result = PublicEvidenceCollector(
+        sources=[source],
+        raw_store=RawArtifactStore(tmp_path / "raw"),
+        archive=EvidenceArchive(),
+        transport=SequenceTransport(response),
+        clock=SequenceClock(T0, T0 + timedelta(seconds=1)),
+    ).collect()
+
+    assert result.raw_captures == ()
+    assert "exceeded max_response_bytes=1024" in result.errors[0]
+
+
+def test_injected_transport_cannot_bypass_size_bound_by_clearing_oversized_flag(tmp_path):
+    source = _source().model_copy(update={"max_response_bytes": 1024})
+    response = HttpResponse(200, b"x" * 1025, {}, source.url, oversized=False)
+    store = RawArtifactStore(tmp_path / "raw")
+    receipts_before = tuple(store.receipts.rglob("*.json"))
+    result = PublicEvidenceCollector(
+        sources=[source],
+        raw_store=store,
+        archive=EvidenceArchive(),
+        transport=SequenceTransport(response),
+        clock=SequenceClock(T0, T0 + timedelta(seconds=1)),
+    ).collect()
+
+    assert result.raw_captures == ()
+    assert tuple(store.receipts.rglob("*.json")) == receipts_before
+    assert "exceeded max_response_bytes=1024" in result.errors[0]
+
+
+def test_approved_resolution_is_passed_to_connection_without_second_dns_lookup(tmp_path):
+    answers = iter((("93.184.216.34",), ("127.0.0.1",)))
+    transport = SequenceTransport(_response(_rss()))
+    collector = PublicEvidenceCollector(
+        sources=[_source()],
+        raw_store=RawArtifactStore(tmp_path / "raw"),
+        archive=EvidenceArchive(),
+        transport=transport,
+        resolver=lambda _host, _port: next(answers),
+        clock=SequenceClock(T0, T0 + timedelta(seconds=1)),
+    )
+
+    result = collector.collect()
+    assert len(result.raw_captures) == 1
+    assert transport.requests[0]["approved_addresses"] == ("93.184.216.34",)
+    assert next(answers) == ("127.0.0.1",)
+
+
+def test_unapproved_connection_peer_is_rejected_before_capture(tmp_path):
+    response = HttpResponse(200, _rss(), {}, _source().url, peer_address="127.0.0.1")
+    result = PublicEvidenceCollector(
+        sources=[_source()],
+        raw_store=RawArtifactStore(tmp_path / "raw"),
+        archive=EvidenceArchive(),
+        transport=SequenceTransport(response),
+        resolver=lambda _host, _port: ("93.184.216.34",),
+        clock=SequenceClock(T0, T0 + timedelta(seconds=1)),
+    ).collect()
+
+    assert result.raw_captures == ()
+    assert "connection peer was not an approved destination" in result.errors[0]
+
+
+def test_missing_connection_peer_is_non_evidentiary_and_not_captured(tmp_path):
+    class MissingPeerTransport:
+        def get(self, url, *, timeout, headers, max_response_bytes, approved_addresses):
+            return HttpResponse(200, _rss(), {}, url)
+
+    result = PublicEvidenceCollector(
+        sources=[_source()],
+        raw_store=RawArtifactStore(tmp_path / "raw"),
+        archive=EvidenceArchive(),
+        transport=MissingPeerTransport(),
+        resolver=lambda _host, _port: ("93.184.216.34",),
+        clock=SequenceClock(T0, T0 + timedelta(seconds=1)),
+    ).collect()
+    assert result.raw_captures == ()
+    assert "connection peer was not an approved destination" in result.errors[0]
+
+
+def test_source_rejects_http_userinfo_and_unsafe_port():
+    for url in (
+        "http://example.test/feed",
+        "https://user:password@example.test/feed",
+        "https://example.test:8443/feed",
+    ):
+        with pytest.raises(ValueError):
+            PublicSourceConfig(
+                source_id="unsafe",
+                url=url,
+                format="rss",
+                publisher="Unsafe",
+            )

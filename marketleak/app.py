@@ -18,6 +18,7 @@ from marketleak.scoring import query_market_ticks
 from marketleak.agents.predict_agent import PredictAgent
 from marketleak.graph.repository import GraphRepository
 from marketleak.graph.clustering import WalletClustering
+from marketleak.graph.safe_persistence import SafePersistenceError, load_cluster_map
 from marketleak.api import read_report_for_product
 
 st.set_page_config(page_title="MarketLeak", layout="wide", page_icon="🕵️‍♂️")
@@ -1655,30 +1656,34 @@ elif menu == "3. Contextual Wallet Graph (Unvalidated)":
     st.markdown("Legacy DuckDB proxy-wallet clustering based on transaction co-occurrence and funding context.")
     
     if st.button("Run Clustering Engine"):
-        cache_path = "demo_data/cache_clusters.pkl"
+        cache_path = "demo_data/cache_clusters.json"
         if not os.path.exists(cache_path):
-            st.warning("Cluster cache not built yet. Please run master_daemon.py.")
+            legacy_exists = os.path.exists("demo_data/cache_clusters.pkl")
+            suffix = " Legacy pickle cache ignored." if legacy_exists else ""
+            st.warning(f"Cluster cache not built yet. Please run master_daemon.py.{suffix}")
+            st.stop()
+
+        try:
+            proxies = load_cluster_map(cache_path)
+        except SafePersistenceError:
+            st.error("Proxy map is unavailable because its cache is corrupt or unsupported.")
             st.stop()
             
-        import pickle
-        with open(cache_path, "rb") as f:
-            proxies = pickle.load(f)
-            
-            num_proxies = len(set(proxies.values()))
-            num_wallets = len(proxies)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown(f"<div class='metric-box'><div class='metric-label'>Tracked Wallets</div><div class='metric-value'>{num_wallets:,}</div></div>", unsafe_allow_html=True)
-            with col2:
-                st.markdown(f"<div class='metric-box'><div class='metric-label'>Proxy Clusters</div><div class='metric-value'>{num_proxies:,}</div></div>", unsafe_allow_html=True)
-                
-            if num_proxies > 0:
-                st.info(
-                    f"The legacy heuristic grouped {num_wallets} wallets into {num_proxies} "
-                    "candidate proxy clusters. These are not verified entities or identities."
-                )
-                df_proxies = pd.DataFrame(list(proxies.items()), columns=["Wallet Address", "Proxy Entity ID"])
-                st.dataframe(df_proxies, use_container_width=True)
-            else:
-                st.info("No proxy clusters found. The graph repository (`demo_data/graph.pkl`) currently has no transactional overlap. Run the blockchain indexer to ingest more data.")
+        num_proxies = len(set(proxies.values()))
+        num_wallets = len(proxies)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"<div class='metric-box'><div class='metric-label'>Tracked Wallets</div><div class='metric-value'>{num_wallets:,}</div></div>", unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"<div class='metric-box'><div class='metric-label'>Proxy Clusters</div><div class='metric-value'>{num_proxies:,}</div></div>", unsafe_allow_html=True)
+
+        if num_proxies > 0:
+            st.info(
+                f"The legacy heuristic grouped {num_wallets} wallets into {num_proxies} "
+                "candidate proxy clusters. These are not verified entities or identities."
+            )
+            df_proxies = pd.DataFrame(list(proxies.items()), columns=["Wallet Address", "Proxy Entity ID"])
+            st.dataframe(df_proxies, use_container_width=True)
+        else:
+            st.info("No proxy clusters found. The graph repository (`demo_data/graph.json`) currently has no transactional overlap. Run the blockchain indexer to ingest more data.")

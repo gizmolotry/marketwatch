@@ -333,7 +333,7 @@ def _graph_data_from_paths(
     paths: list[tuple[list[str], float]],
     wallet_node_ids: list[str],
     event_node_id: str,
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, Any]:
     included_node_ids: set[str] = {event_node_id, *wallet_node_ids}
     path_edges = set()
     for path, _score in paths:
@@ -406,7 +406,15 @@ def _graph_data_from_paths(
         for source, target, data in selected_edges
         if source in included_node_ids and target in included_node_ids
     ]
-    return {"nodes": nodes, "links": links}
+    availability = graph_repo.availability_payload()
+    return {
+        "status": availability["status"],
+        "reason": availability["reason"],
+        "persisted_graph": availability,
+        "live_context_present": bool(nodes or links),
+        "nodes": nodes,
+        "links": links,
+    }
 
 
 def _run_pipeline_for_row(row: pd.Series) -> dict[str, Any]:
@@ -418,6 +426,7 @@ def _run_pipeline_for_row(row: pd.Series) -> dict[str, Any]:
     leak_prior = _get_leak_model().forecast_risk(candidate.market_uid, event_uid, event_features)
 
     graph_repo = GraphRepository()
+    graph_availability = graph_repo.availability_payload()
     blockchain_agent = BlockchainAgent()
     blockchain_error: str | None = None
     blockchain_result = None
@@ -440,7 +449,18 @@ def _run_pipeline_for_row(row: pd.Series) -> dict[str, Any]:
     if not wallet_node_ids:
         wallet_node_ids = _wallet_nodes_for_market(graph_repo, candidate.market_uid)
 
-    graph_enrichment = _paths_to_graph_enrichment(candidate.alert_uid, paths)
+    graph_enrichment = (
+        _paths_to_graph_enrichment(candidate.alert_uid, paths)
+        if graph_repo.persisted_graph_available
+        else None
+    )
+    graph_enrichment_status = (
+        "available_with_paths"
+        if graph_enrichment is not None
+        else "available_no_paths"
+        if graph_repo.persisted_graph_available
+        else "unavailable_persisted_graph"
+    )
 
     try:
         rag_result = _get_rag_agent().fetch_and_score(market_payload)
@@ -502,6 +522,8 @@ def _run_pipeline_for_row(row: pd.Series) -> dict[str, Any]:
         "leak_risk_forecast": float(leak_prior.score),
         "leak_risk_deprecated": True,
         "graph_data": graph_data,
+        "graph_availability": graph_availability,
+        "graph_enrichment_status": graph_enrichment_status,
         "graph_enrichment": graph_enrichment.model_dump() if graph_enrichment else None,
         "blockchain_summary": {
             "wallet_count": len(wallet_node_ids),

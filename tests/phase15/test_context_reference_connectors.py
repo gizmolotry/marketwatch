@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -34,12 +35,20 @@ class FakeTransport:
     def __init__(self, responses: list[HttpResponse]) -> None:
         self.responses = list(responses)
         self.calls: list[tuple[str, str, dict[str, object], float]] = []
+        self.security_bounds: list[tuple[int | None, tuple[str, ...] | None]] = []
 
-    def request(self, method: str, url: str, *, params, timeout: float) -> HttpResponse:
+    def request(
+        self, method: str, url: str, *, params, timeout: float,
+        max_response_bytes=None, approved_addresses=None,
+    ) -> HttpResponse:
         self.calls.append((method, url, dict(params or {}), timeout))
+        self.security_bounds.append((max_response_bytes, approved_addresses))
         if not self.responses:
             raise AssertionError("collector attempted an unconfigured/default endpoint")
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if not response.peer_address and approved_addresses:
+            response = replace(response, peer_address=approved_addresses[0])
+        return response
 
 
 class RecordingStore(RawArtifactStore):
@@ -302,3 +311,184 @@ def test_hash_conflict_is_quarantined_after_raw_receipt_not_parsed(tmp_path) -> 
     assert result.context is None
     assert result.raw_captures[0].sha256 == hashlib.sha256(body).hexdigest()
     assert result.raw_captures[0].receipt_path.exists()
+
+
+def test_configured_context_receipt_redacts_query_parameters_and_response_secrets(tmp_path) -> None:
+    secret = "signed-secret-value"
+    configured_endpoint = RawEndpoint(
+        endpoint_url=f"https://example.test/context?signature={secret}",
+        platform="example",
+        dataset="market_context",
+        policy=policy(RULE_SOURCE_UID, SourceClass.OFFICIAL_VENUE),
+        parser_version="phase15-security-test-v1",
+        params={"api_key": secret, "market": MARKET_UID},
+    )
+    transport = FakeTransport(
+        [
+            HttpResponse(
+                200,
+                json.dumps(context_payload()).encode("utf-8"),
+                {"Content-Type": "application/json", "Set-Cookie": f"session={secret}"},
+                configured_endpoint.endpoint_url,
+            )
+        ]
+    )
+    store = RawArtifactStore(tmp_path / "raw")
+    result = MarketContextCollector(
+        raw_store=store,
+        transport=transport,
+        sources=(MarketContextSourceConfig(market_uid=MARKET_UID, endpoint=configured_endpoint),),
+    ).collect(
+        market_uid=MARKET_UID,
+        as_of=T0 + timedelta(minutes=3),
+        received_at=T0 + timedelta(minutes=2),
+    )
+
+    receipt = store.read_receipt(result.raw_captures[0])
+    serialized = json.dumps(receipt)
+    assert secret not in serialized
+    assert receipt["request"]["parameter_names"] == ["api_key", "market"]
+    assert receipt["request"]["redacted_parameter_names"] == ["api_key"]
+    assert "set-cookie" not in receipt["response_metadata"]["headers"]
+    assert secret not in result.context.provenance.source_url
+    assert secret not in json.dumps(result.coverage[0].filters)
+
+
+def test_configured_context_oversize_is_explicit_and_not_captured(tmp_path) -> None:
+    configured_endpoint = RawEndpoint(
+        endpoint_url="https://example.test/context",
+        platform="example",
+        dataset="market_context",
+        policy=policy(RULE_SOURCE_UID, SourceClass.OFFICIAL_VENUE),
+        parser_version="phase15-security-test-v1",
+        max_response_bytes=1024,
+    )
+    transport = FakeTransport([HttpResponse(200, b"", {}, configured_endpoint.endpoint_url, oversized=True)])
+    store = RawArtifactStore(tmp_path / "raw")
+    result = MarketContextCollector(
+        raw_store=store,
+        transport=transport,
+        sources=(MarketContextSourceConfig(market_uid=MARKET_UID, endpoint=configured_endpoint),),
+    ).collect(market_uid=MARKET_UID, as_of=T0, received_at=T0)
+
+    assert result.status == CollectionStatus.UNAVAILABLE_INCOMPLETE
+    assert result.raw_captures == ()
+    assert not any(store.receipts.rglob("*.json"))
+    assert "exceeded max_response_bytes=1024" in result.reason
+
+
+def test_context_endpoint_rejects_lexically_unsafe_urls_without_construction_network():
+    for url in (
+        "http://example.test/context",
+        "https://user:secret@example.test/context",
+        "https://example.test:8443/context",
+        "https://127.0.0.1/context",
+        "https://169.254.169.254/context",
+    ):
+        with pytest.raises(ValueError):
+            endpoint(
+                source_uid=RULE_SOURCE_UID,
+                source_class=SourceClass.OFFICIAL_VENUE,
+                dataset="market_context",
+                url=url,
+            )
+
+
+def test_context_private_dns_is_rejected_before_transport_and_capture(tmp_path) -> None:
+    configured_endpoint = endpoint(
+        source_uid=RULE_SOURCE_UID,
+        source_class=SourceClass.OFFICIAL_VENUE,
+        dataset="market_context",
+        url="https://example.test/context",
+    )
+    transport = FakeTransport([response(context_payload())])
+    store = RawArtifactStore(tmp_path / "raw")
+    result = MarketContextCollector(
+        raw_store=store,
+        transport=transport,
+        resolver=lambda _host, _port: ("10.0.0.8",),
+        sources=(MarketContextSourceConfig(market_uid=MARKET_UID, endpoint=configured_endpoint),),
+    ).collect(market_uid=MARKET_UID, as_of=T0, received_at=T0)
+
+    assert result.status == CollectionStatus.REJECTED_UNSAFE_SOURCE
+    assert transport.calls == []
+    assert result.raw_captures == ()
+
+
+def test_context_effective_origin_and_peer_must_match_approved_connection(tmp_path) -> None:
+    configured_endpoint = endpoint(
+        source_uid=RULE_SOURCE_UID,
+        source_class=SourceClass.OFFICIAL_VENUE,
+        dataset="market_context",
+        url="https://example.test/context",
+    )
+    for effective_url, peer_address in (
+        ("https://attacker.test/context", "93.184.216.34"),
+        (configured_endpoint.endpoint_url, "127.0.0.1"),
+    ):
+        transport = FakeTransport(
+            [
+                HttpResponse(
+                    200,
+                    json.dumps(context_payload()).encode(),
+                    {},
+                    effective_url,
+                    peer_address=peer_address,
+                )
+            ]
+        )
+        store = RawArtifactStore(tmp_path / effective_url.split("//", 1)[1].replace("/", "-"))
+        result = MarketContextCollector(
+            raw_store=store,
+            transport=transport,
+            resolver=lambda _host, _port: ("93.184.216.34",),
+            sources=(MarketContextSourceConfig(market_uid=MARKET_UID, endpoint=configured_endpoint),),
+        ).collect(market_uid=MARKET_UID, as_of=T0, received_at=T0)
+
+        assert result.status == CollectionStatus.REJECTED_UNSAFE_SOURCE
+        assert result.raw_captures == ()
+        assert not any(store.receipts.rglob("*.json"))
+
+
+def test_context_transport_receives_the_approved_address_and_read_bound(tmp_path) -> None:
+    configured_endpoint = endpoint(
+        source_uid=RULE_SOURCE_UID,
+        source_class=SourceClass.OFFICIAL_VENUE,
+        dataset="market_context",
+        url="https://example.test/context",
+    )
+    transport = FakeTransport([response(context_payload())])
+    MarketContextCollector(
+        raw_store=RawArtifactStore(tmp_path / "raw"),
+        transport=transport,
+        resolver=lambda _host, _port: ("93.184.216.34",),
+        sources=(MarketContextSourceConfig(market_uid=MARKET_UID, endpoint=configured_endpoint),),
+    ).collect(market_uid=MARKET_UID, as_of=T0 + timedelta(minutes=3), received_at=T0 + timedelta(minutes=2))
+
+    assert transport.security_bounds == [(2_000_000, ("93.184.216.34",))]
+
+
+def test_context_missing_peer_attestation_is_rejected_before_capture(tmp_path) -> None:
+    configured_endpoint = endpoint(
+        source_uid=RULE_SOURCE_UID,
+        source_class=SourceClass.OFFICIAL_VENUE,
+        dataset="market_context",
+        url="https://example.test/context",
+    )
+
+    class MissingPeerTransport:
+        def request(
+            self, method, url, *, params, timeout, max_response_bytes, approved_addresses
+        ):
+            return response(context_payload(), url=url)
+
+    store = RawArtifactStore(tmp_path / "raw")
+    result = MarketContextCollector(
+        raw_store=store,
+        transport=MissingPeerTransport(),
+        resolver=lambda _host, _port: ("93.184.216.34",),
+        sources=(MarketContextSourceConfig(market_uid=MARKET_UID, endpoint=configured_endpoint),),
+    ).collect(market_uid=MARKET_UID, as_of=T0, received_at=T0)
+    assert result.status == CollectionStatus.REJECTED_UNSAFE_SOURCE
+    assert result.raw_captures == ()
+    assert not any(store.receipts.rglob("*.json"))
