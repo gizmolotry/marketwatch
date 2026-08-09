@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from decimal import Decimal
 import http.client
 import ipaddress
+import math
 import re
 import socket
 import ssl
@@ -151,6 +153,54 @@ def safe_request_metadata(
     }
     metadata.update(non_secret)
     return metadata
+
+
+def canonical_public_parameters(
+    params: Mapping[str, Any] | None,
+    allowlist: frozenset[str] | None,
+) -> dict[str, str | int | bool]:
+    """Retain only explicitly public, bounded scalar query parameters.
+
+    The default is no value retention.  An allowlist is a per-call declaration,
+    not a request to retain arbitrary remainder: sensitive names are forbidden,
+    nested values are forbidden, and both names and scalar renderings are
+    tightly bounded before receipt serialization.
+    """
+
+    if allowlist is None:
+        return {}
+    if not isinstance(allowlist, frozenset) or len(allowlist) > 32:
+        raise ValueError("public parameter allowlist must be a frozenset of at most 32 names")
+    for name in allowlist:
+        if type(name) is not str or not name or len(name) > 64 or _SENSITIVE_KEY.search(name):
+            raise ValueError("public parameter allowlist contains an unsafe name")
+    retained: dict[str, str | int | bool] = {}
+    for raw_name, value in (params or {}).items():
+        name = str(raw_name)
+        if name not in allowlist:
+            continue
+        if isinstance(value, bool):
+            normalized: str | int | bool = value
+        elif isinstance(value, int):
+            if len(str(value)) > 32:
+                raise ValueError("public parameter integer is too large")
+            normalized = value
+        elif isinstance(value, Decimal):
+            if not value.is_finite():
+                raise ValueError("public parameter decimal must be finite")
+            normalized = format(value, "f")
+        elif isinstance(value, float):
+            if not math.isfinite(value):
+                raise ValueError("public parameter float must be finite")
+            normalized = repr(value)
+        elif isinstance(value, str):
+            normalized = value
+        else:
+            raise ValueError("public receipt parameters must be scalar")
+        if isinstance(normalized, str) and len(normalized.encode("utf-8")) > 512:
+            raise ValueError("public parameter value exceeds 512 UTF-8 bytes")
+        retained[name] = normalized
+    return dict(sorted(retained.items()))
 
 
 def safe_response_metadata(*, status_code: int, url: str, headers: Mapping[str, Any]) -> dict[str, Any]:
@@ -347,6 +397,18 @@ class RequestsTransport:
 class ParsedResponse:
     payload: Any
     raw: RawCapture
+    # Every response-bearing attempt is evidence.  ``raw`` is the final,
+    # successfully parsed response; ``attempt_captures`` also includes any
+    # retryable HTTP responses that preceded it, in attempt order.
+    attempt_captures: tuple[RawCapture, ...]
+
+    def __post_init__(self) -> None:
+        attempts = tuple(self.attempt_captures)
+        if not attempts or attempts[-1] != self.raw:
+            raise ValueError("attempt_captures must end with the parsed raw response")
+        if len({item.receipt_path for item in attempts}) != len(attempts):
+            raise ValueError("attempt_captures must preserve distinct retrieval receipts")
+        object.__setattr__(self, "attempt_captures", attempts)
 
 
 class ConnectorHttpError(RuntimeError):
@@ -383,6 +445,10 @@ class EvidenceHttpClient:
         self.raw_store = raw_store
         self.transport = transport or RequestsTransport()
         self.timeout = timeout
+        if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
+            raise ValueError("max_attempts must be an integer")
+        if not 1 <= max_attempts <= 16:
+            raise ValueError("max_attempts must be in [1, 16]")
         self.max_attempts = max_attempts
         self.sleep = sleep
         if max_response_bytes < 1024 or max_response_bytes > 10_000_000:
@@ -398,8 +464,17 @@ class EvidenceHttpClient:
         source: str,
         url: str,
         params: Mapping[str, Any] | None = None,
+        public_parameter_allowlist: frozenset[str] | None = None,
+        max_attempts: int | None = None,
     ) -> ParsedResponse:
-        for attempt in range(1, self.max_attempts + 1):
+        public_parameters = canonical_public_parameters(params, public_parameter_allowlist)
+        attempt_limit = self.max_attempts if max_attempts is None else max_attempts
+        if isinstance(attempt_limit, bool) or not isinstance(attempt_limit, int):
+            raise ValueError("max_attempts override must be an integer")
+        if not 1 <= attempt_limit <= self.max_attempts:
+            raise ValueError("max_attempts override must be in [1, configured max_attempts]")
+        captures: list[RawCapture] = []
+        for attempt in range(1, attempt_limit + 1):
             approved_origin, approved_addresses = approved_https_destination(url, self.resolver)
             transport_failure_type: str | None = None
             try:
@@ -433,19 +508,28 @@ class EvidenceHttpClient:
                 response.body,
                 platform=platform,
                 source=source,
-                request=safe_request_metadata(method="GET", url=url, params=params, attempt=attempt),
+                request=safe_request_metadata(
+                    method="GET",
+                    url=url,
+                    params=params,
+                    attempt=attempt,
+                    public_parameters=public_parameters,
+                ),
                 response_metadata=safe_response_metadata(
                     status_code=response.status_code, url=response.url, headers=response.headers
                 ),
             )
+            captures.append(capture)
             if 200 <= response.status_code < 300:
                 try:
-                    return ParsedResponse(parse_json_decimal(response.body), capture)
+                    return ParsedResponse(
+                        parse_json_decimal(response.body), capture, tuple(captures)
+                    )
                 except (UnicodeDecodeError, ValueError) as exc:
                     raise ConnectorPayloadError(
                         f"invalid JSON from {safe_url(url)}; raw_sha256={capture.sha256}"
                     ) from exc
-            if response.status_code in self.RETRYABLE and attempt < self.max_attempts:
+            if response.status_code in self.RETRYABLE and attempt < attempt_limit:
                 retry_after = response.headers.get("Retry-After")
                 try:
                     delay = float(retry_after) if retry_after is not None else float(2 ** (attempt - 1))

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from marketleak.ingestion.connectors.http import (
@@ -198,6 +200,73 @@ def test_generic_http_client_passes_transport_bound_and_never_captures_oversized
 
     assert transport.calls == [(1024, ("93.184.216.34",))]
     assert not any(store.receipts.rglob("*.json"))
+
+
+def test_public_parameter_receipt_retention_is_explicit_bounded_and_secret_free(tmp_path):
+    store = RawArtifactStore(tmp_path / "raw")
+    client = EvidenceHttpClient(
+        store,
+        transport=_BoundAwareTransport(b"{}", oversized=False),
+        resolver=lambda _host, _port: ("93.184.216.34",),
+    )
+    client.get_json(
+        platform="polymarket",
+        source="data-api/trades",
+        url="https://data-api.polymarket.com/trades",
+        params={
+            "market": "0x" + "1" * 64,
+            "offset": 0,
+            "takerOnly": False,
+            "api_key": "must-never-persist",
+            "cookie": "must-never-persist-either",
+        },
+        public_parameter_allowlist=frozenset({"market", "offset", "takerOnly"}),
+    )
+    receipt = json.loads(next(store.receipts.rglob("*.json")).read_bytes())
+    assert receipt["request"]["public_parameters"] == {
+        "market": "0x" + "1" * 64,
+        "offset": 0,
+        "takerOnly": False,
+    }
+    serialized = json.dumps(receipt)
+    assert "must-never-persist" not in serialized
+    assert "api_key" not in receipt["request"]["public_parameters"]
+
+
+@pytest.mark.parametrize("name", ["api_key", "token", "cookie", "signature", "client_secret"])
+def test_sensitive_names_cannot_be_declared_public(tmp_path, name):
+    client = EvidenceHttpClient(
+        RawArtifactStore(tmp_path / "raw"),
+        transport=_BoundAwareTransport(b"{}", oversized=False),
+        resolver=lambda _host, _port: ("93.184.216.34",),
+    )
+    with pytest.raises(ValueError, match="unsafe name"):
+        client.get_json(
+            platform="example",
+            source="example:fixture",
+            url="https://example.test/data",
+            params={name: "secret"},
+            public_parameter_allowlist=frozenset({name}),
+        )
+
+
+@pytest.mark.parametrize("value", [["nested"], {"nested": True}, "x" * 513])
+def test_nested_or_oversized_public_values_fail_before_transport(tmp_path, value):
+    transport = _BoundAwareTransport(b"{}", oversized=False)
+    client = EvidenceHttpClient(
+        RawArtifactStore(tmp_path / "raw"),
+        transport=transport,
+        resolver=lambda _host, _port: ("93.184.216.34",),
+    )
+    with pytest.raises(ValueError, match="scalar|exceeds"):
+        client.get_json(
+            platform="example",
+            source="example:fixture",
+            url="https://example.test/data",
+            params={"market": value},
+            public_parameter_allowlist=frozenset({"market"}),
+        )
+    assert transport.calls == []
 
 
 @pytest.mark.parametrize(

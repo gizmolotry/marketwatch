@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
+import tempfile
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -19,10 +21,21 @@ from marketleak.evidence.collector import (
 )
 from marketleak.evidence.coverage import CoverageLedger as PublicCoverageLedger
 from marketleak.detectors import CausalActivityDetector, DetectorConfig
-from marketleak.ingestion import CoverageLedger, CoverageRecord, NormalizedStore, RawArtifactStore
+from marketleak.ingestion import (
+    CoverageLedger,
+    CoverageRecord,
+    NormalizedStore,
+    PolymarketPopulationBackfill,
+    PolymarketPopulationError,
+    PolymarketPopulationRequest,
+    RawArtifactStore,
+)
+from marketleak.ingestion.polymarket_population import PolymarketPopulationEvidenceBound
+from marketleak.ingestion.raw_store import RawCapture
 from marketleak.ingestion.connectors import KalshiConnector, PolymarketConnector
 from marketleak.ingestion.connectors.http import EvidenceHttpClient
 from marketleak.ingestion.connectors.models import IngestionBatch
+from marketleak.ingestion.normalize import canonical_json_bytes
 from marketleak.pipeline_v2 import (
     CANONICAL_PIPELINE_SOURCE,
     CAPABILITIES_V2,
@@ -126,6 +139,383 @@ def _write_batch(store: NormalizedStore, batch: IngestionBatch) -> dict[str, Any
             "rejected": result.rejected,
         }
         for name, result in results.items()
+    }
+
+
+def _write_immutable_manifest(*, path: Path, payload: Mapping[str, Any]) -> tuple[str, bool]:
+    """Atomically publish a canonical manifest without replacing a winner.
+
+    The complete payload is first durably written to a same-directory temporary
+    file. A hard link publishes that file only if the destination is absent;
+    unlike replacement, it cannot overwrite a concurrently published manifest.
+    Both a new winner and an existing winner are read back and authenticated
+    before this function returns.
+    """
+
+    encoded = canonical_json_bytes(payload)
+    digest = hashlib.sha256(encoded).hexdigest()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".pending", dir=path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary_name, path)
+            preexisting = False
+        except FileExistsError:
+            preexisting = True
+        except OSError as exc:
+            raise PolymarketPopulationError(
+                f"immutable population manifest could not be atomically published: {path}"
+            ) from exc
+    finally:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+
+    try:
+        winner = path.read_bytes()
+    except OSError as exc:
+        raise PolymarketPopulationError(
+            f"immutable population manifest winner cannot be read: {path}"
+        ) from exc
+    winner_digest = hashlib.sha256(winner).hexdigest()
+    if winner_digest != digest or winner != encoded:
+        if preexisting:
+            raise PolymarketPopulationError(
+                "immutable population manifest path already contains different bytes: "
+                f"{path}"
+            )
+        raise PolymarketPopulationError(
+            f"immutable population manifest winner failed post-publication verification: {path}"
+        )
+    return digest, preexisting
+
+
+def _source_bound_path(value: Any, *, field_name: str, config_path: Path) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"source-bound {field_name} must be a non-empty path")
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = config_path.parent / candidate
+    try:
+        return candidate.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"source-bound {field_name} does not exist") from exc
+
+
+def _load_polymarket_population_evidence_bound(
+    path: str | Path,
+) -> PolymarketPopulationEvidenceBound:
+    """Load a canonical source contract and market-activity lower bound.
+
+    The CLI deliberately accepts a local evidence bundle rather than timestamps
+    or documentation claims through argv.  It recreates and verifies the raw
+    capture before delegating receipt binding to ``from_capture``.
+    """
+
+    config_path = Path(path)
+    try:
+        encoded = config_path.read_bytes()
+        payload = json.loads(encoded)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("source-bound file cannot be read as JSON") from exc
+    if not isinstance(payload, dict) or encoded != canonical_json_bytes(payload):
+        raise ValueError("source-bound file must be canonical JSON")
+    required = {
+        "schema_version",
+        "condition_id",
+        "gamma_market_id",
+        "market_activity_lower_bound",
+        "observed_at",
+        "official_contract_uri",
+        "official_contract_version",
+        "official_contract_sha256",
+        "contract_capture",
+        "contract_receipt_id",
+        "contract_receipt_sha256",
+        "market_metadata_sha256",
+        "market_metadata_capture",
+        "market_metadata_receipt_id",
+        "market_metadata_receipt_sha256",
+        "market_activity_lower_bound_field",
+    }
+    if set(payload) != required:
+        raise ValueError("source-bound file has an unsupported or incomplete schema")
+    if payload["schema_version"] != "polymarket-population-source-bound-input-v1":
+        raise ValueError("source-bound file has an unsupported schema_version")
+    required_capture = {
+        "sha256",
+        "byte_length",
+        "object_path",
+        "receipt_path",
+        "received_at",
+        "platform",
+        "source",
+    }
+    def capture_from_config(name: str) -> RawCapture:
+        capture_payload = payload[name]
+        if not isinstance(capture_payload, dict) or set(capture_payload) != required_capture:
+            raise ValueError(f"source-bound {name} has an unsupported or incomplete schema")
+        try:
+            capture = RawCapture(
+                sha256=capture_payload["sha256"],
+                byte_length=capture_payload["byte_length"],
+                object_path=_source_bound_path(
+                    capture_payload["object_path"], field_name=f"{name}.object_path", config_path=config_path
+                ),
+                receipt_path=_source_bound_path(
+                    capture_payload["receipt_path"], field_name=f"{name}.receipt_path", config_path=config_path
+                ),
+                received_at=_datetime(capture_payload["received_at"]),
+                platform=capture_payload["platform"],
+                source=capture_payload["source"],
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"source-bound {name} is invalid") from exc
+        try:
+            raw_bytes = capture.object_path.read_bytes()
+        except OSError as exc:
+            raise ValueError(f"source-bound {name} raw object cannot be read") from exc
+        if len(raw_bytes) != capture.byte_length or hashlib.sha256(raw_bytes).hexdigest() != capture.sha256:
+            raise ValueError(f"source-bound {name} raw object does not match capture metadata")
+        return capture
+
+    capture = capture_from_config("contract_capture")
+    metadata_capture = capture_from_config("market_metadata_capture")
+    try:
+        bound = PolymarketPopulationEvidenceBound.from_capture(
+            condition_id=payload["condition_id"],
+            gamma_market_id=payload["gamma_market_id"],
+            official_contract_version=payload["official_contract_version"],
+            contract_capture=capture,
+            market_metadata_capture=metadata_capture,
+            official_contract_uri=payload["official_contract_uri"],
+        )
+    except (OSError, ValueError) as exc:
+        raise ValueError("source-bound evidence does not form a valid Polymarket bound") from exc
+    expected = {
+        "condition_id": bound.condition_id,
+        "gamma_market_id": bound.gamma_market_id,
+        "market_activity_lower_bound": bound.market_activity_lower_bound.isoformat(
+            timespec="microseconds"
+        ).replace("+00:00", "Z"),
+        "observed_at": bound.observed_at.isoformat(timespec="microseconds").replace("+00:00", "Z"),
+        "official_contract_uri": bound.official_contract_uri,
+        "official_contract_version": bound.official_contract_version,
+        "official_contract_sha256": bound.official_contract_sha256,
+        "contract_receipt_id": bound.contract_receipt_id,
+        "contract_receipt_sha256": bound.contract_receipt_sha256,
+        "market_metadata_sha256": bound.market_metadata_sha256,
+        "market_metadata_receipt_id": bound.market_metadata_receipt_id,
+        "market_metadata_receipt_sha256": bound.market_metadata_receipt_sha256,
+        "market_activity_lower_bound_field": bound.market_activity_lower_bound_field,
+    }
+    if any(payload[name] != value for name, value in expected.items()):
+        raise ValueError("source-bound file conflicts with its raw capture or receipt")
+    return bound
+
+
+def _load_approved_polymarket_contract_hashes(path: str | Path) -> frozenset[str]:
+    """Load the separately governed allowlist for official-doc snapshots."""
+
+    try:
+        encoded = Path(path).read_bytes()
+        payload = json.loads(encoded)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("approved-contract policy file cannot be read as JSON") from exc
+    if not isinstance(payload, dict) or encoded != canonical_json_bytes(payload):
+        raise ValueError("approved-contract policy file must be canonical JSON")
+    if set(payload) != {"schema_version", "approved_contract_sha256"}:
+        raise ValueError("approved-contract policy file has an unsupported or incomplete schema")
+    if payload["schema_version"] != "polymarket-approved-contract-sha256-v1":
+        raise ValueError("approved-contract policy file has an unsupported schema_version")
+    values = payload["approved_contract_sha256"]
+    if not isinstance(values, list) or not values:
+        raise ValueError("approved-contract policy requires a non-empty hash list")
+    if any(type(item) is not str or len(item) != 64 for item in values):
+        raise ValueError("approved-contract policy hashes must be SHA-256 strings")
+    normalized = frozenset(item.lower() for item in values)
+    if len(normalized) != len(values) or any(
+        any(character not in "0123456789abcdef" for character in item) for item in normalized
+    ):
+        raise ValueError("approved-contract policy hashes must be unique lowercase SHA-256 values")
+    return normalized
+
+
+def _append_population_terminal_coverage(
+    ledger: CoverageLedger,
+    *,
+    manifest: Any,
+) -> tuple[tuple[CoverageRecord, ...], tuple[dict[str, Any], ...]]:
+    """Append exact terminal-leaf coverage claims from one published manifest.
+
+    The generic coverage schema has no run/manifest linkage field, so a row's
+    exact source filters and raw hashes remain its admissible identity.  The
+    manifest itself is first published immutably and returned separately.
+    This source's exact market-query retention floor is unknown/approximate, so
+    every ledger row remains partial even when the exact query was exhausted. A terminal
+    budget leaf may have no delivery, receipt, raw object, or retrieval clock;
+    it is reported back to the operator as unrecorded instead of inventing a
+    ``CoverageRecord`` that would look like observed evidence.
+    """
+
+    terminal_leaves = tuple(
+        leaf for leaf in manifest.leaves if getattr(leaf, "status", None) != "split_required"
+    )
+    if not terminal_leaves:
+        raise PolymarketPopulationError("population manifest has no terminal coverage leaves")
+    records: list[CoverageRecord] = []
+    unrecorded: list[dict[str, Any]] = []
+    for leaf in terminal_leaves:
+        if leaf.retrieved_at is None:
+            unrecorded.append(
+                {
+                    "interval_start": leaf.interval_start,
+                    "interval_end": leaf.interval_end,
+                    "status": leaf.status,
+                    "continuation": leaf.continuation,
+                    "query_filters": dict(leaf.query_filters),
+                    "reason": "terminal_leaf_has_no_observed_delivery",
+                }
+            )
+            continue
+        record = CoverageRecord(
+            platform="polymarket",
+            dataset="public_market_trades",
+            interval_start=leaf.interval_start,
+            interval_end=leaf.interval_end,
+            fetched_at=leaf.retrieved_at,
+            record_count=leaf.raw_record_count,
+            complete=False,
+            raw_sha256=leaf.raw_sha256,
+            continuation=leaf.continuation,
+            filters=dict(leaf.query_filters),
+        )
+        ledger.append(record)
+        records.append(record)
+    return tuple(records), tuple(unrecorded)
+
+
+def collect_polymarket_population(
+    *,
+    output_dir: str | Path,
+    condition_id: str,
+    start: datetime,
+    end: datetime,
+    source_bound: PolymarketPopulationEvidenceBound,
+    approved_contract_sha256: frozenset[str],
+    page_size: int = 1_000,
+    max_requests: int = 50_000,
+    max_http_attempts: int = 100_000,
+    max_leaves: int = 4_096,
+    http_client: EvidenceHttpClient | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> dict[str, Any]:
+    """Collect one exact Polymarket condition population with explicit coverage.
+
+    The backfill itself controls page traversal and recursive splitting.  This
+    operator boundary deliberately exposes no unbounded market/event scope,
+    continuation, or taker-only switch.
+    """
+
+    request = PolymarketPopulationRequest(
+        condition_id=condition_id,
+        interval_start=start,
+        interval_end=end,
+        source_bound=source_bound,
+        page_size=page_size,
+        max_requests=max_requests,
+        max_http_attempts=max_http_attempts,
+        max_leaves=max_leaves,
+    )
+    root = Path(output_dir)
+    raw_store = RawArtifactStore(root / "raw")
+    http = http_client or EvidenceHttpClient(raw_store)
+    if http.raw_store.root.resolve() != raw_store.root.resolve():
+        raise ValueError("injected HTTP client must use output_dir/raw as its RawArtifactStore")
+
+    connector = PolymarketConnector(http, clock=clock)
+    result = PolymarketPopulationBackfill(
+        connector,
+        NormalizedStore(root),
+        approved_contract_sha256=approved_contract_sha256,
+    ).collect(request)
+    manifest_payload = result.manifest.to_payload()
+    # Query identity freezes scope; manifest identity also binds the specific
+    # capture receipts, retrieval times, and lineage.  Replaying a source may
+    # legitimately create a new receipt for the same query, so keep each
+    # manifest append-only rather than overwriting a query-level ``latest``.
+    manifest_path = (
+        root
+        / "population-manifests"
+        / request.query_uid
+        / f"{result.manifest.manifest_sha256}.json"
+    )
+    manifest_file_sha256, manifest_preexisting = _write_immutable_manifest(
+        path=manifest_path,
+        payload=manifest_payload,
+    )
+
+    storage = result.storage_write
+    manifest = result.manifest
+    coverage_records, unrecorded_terminal_leaves = _append_population_terminal_coverage(
+        CoverageLedger(root / "coverage" / "ledger.jsonl"), manifest=manifest
+    )
+    return {
+        "command": "collect-polymarket-population",
+        "output_dir": str(root),
+        "condition_id": request.condition_id,
+        "query_uid": request.query_uid,
+        "manifest_sha256": manifest.manifest_sha256,
+        "manifest_file_sha256": manifest_file_sha256,
+        "manifest_path": str(manifest_path),
+        "manifest_preexisting": manifest_preexisting,
+        "complete": manifest.complete,
+        "coverage_status": manifest.coverage_status,
+        "limitation_reasons": list(manifest.limitation_reasons),
+        "coverage": {
+            "dataset": "public_market_trades",
+            "recorded_terminal_leaf_count": len(coverage_records),
+            "recorded_partial_leaf_count": len(coverage_records),
+            "unrecorded_terminal_leaf_count": len(unrecorded_terminal_leaves),
+            "unrecorded_terminal_leaves": list(unrecorded_terminal_leaves),
+            "complete_leaf_count": 0,
+            "data_api_retention_floor": "unknown_or_approximate",
+        },
+        "query_filters": dict(request.query_filters),
+        "bounded": {
+            "page_size": request.page_size,
+            "max_requests": request.max_requests,
+            "max_http_attempts": request.max_http_attempts,
+            "max_leaves": request.max_leaves,
+        },
+        "counts": {
+            "raw_records": manifest.raw_record_count,
+            "canonical_records": manifest.canonical_record_count,
+            "duplicate_records": manifest.duplicate_record_count,
+            "conflict_records": manifest.conflict_record_count,
+            "normalized_inserted": storage.inserted,
+            "normalized_duplicates": storage.duplicates,
+            "normalized_conflicts": storage.conflicts,
+            "normalized_rejected": storage.rejected,
+        },
+        "lineage": {
+            "raw_sha256": list(manifest.raw_sha256),
+            "leaf_count": len(manifest.leaves),
+            "normalized_paths": list(storage.paths),
+            "quarantine_paths": list(storage.quarantine_paths),
+        },
+        "network_was_requested": True,
+        "pseudonymous_wallets_only": True,
+        "not_identity_attribution": True,
+        "not_proof_of_fraud": True,
+        "effectiveness_unknown": True,
     }
 
 
@@ -847,6 +1237,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Request taker-side records only; by default both maker and taker roles are collected",
     )
 
+    population = commands.add_parser(
+        "collect-polymarket-population",
+        help="Collect one exact Polymarket condition's public trade population",
+    )
+    population.add_argument("--output-dir", required=True, help="Persistent raw/normalized/manifest root")
+    population.add_argument(
+        "--condition-id",
+        required=True,
+        help="One exact 0x-prefixed 64-hex Polymarket condition identifier",
+    )
+    population.add_argument("--start", required=True, help="Inclusive whole-second ISO-8601 UTC lower bound")
+    population.add_argument("--end", required=True, help="Inclusive whole-second ISO-8601 UTC upper bound")
+    population.add_argument("--page-size", type=int, default=1000, help="Bounded to [1, 10000]")
+    population.add_argument(
+        "--source-bound",
+        required=True,
+        help="Canonical JSON binding the official source contract and condition-specific market activity lower bound",
+    )
+    population.add_argument(
+        "--approved-contract-sha256-file",
+        required=True,
+        help="Canonical operator-approved JSON allowlist for official Polymarket trades-contract snapshot hashes",
+    )
+    population.add_argument(
+        "--max-requests", type=int, default=50_000,
+        help="Logical page requests, bounded to [1, 100000]",
+    )
+    population.add_argument(
+        "--max-http-attempts", type=int, default=100_000,
+        help="All response-bearing HTTP attempts including retries, bounded to [1, 400000]",
+    )
+    population.add_argument("--max-leaves", type=int, default=4_096, help="Bounded to [1, 65536]")
+
     evidence = commands.add_parser(
         "collect-evidence-once",
         help="Run bounded point-in-time collection from an explicit source config",
@@ -944,6 +1367,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_pages=args.max_pages,
             taker_only=args.taker_only,
         )
+    elif args.command == "collect-polymarket-population":
+        try:
+            payload = collect_polymarket_population(
+                output_dir=args.output_dir,
+                condition_id=args.condition_id,
+                start=_datetime(args.start),
+                end=_datetime(args.end),
+                source_bound=_load_polymarket_population_evidence_bound(args.source_bound),
+                approved_contract_sha256=_load_approved_polymarket_contract_hashes(
+                    args.approved_contract_sha256_file
+                ),
+                page_size=args.page_size,
+                max_requests=args.max_requests,
+                max_http_attempts=args.max_http_attempts,
+                max_leaves=args.max_leaves,
+            )
+        except (PolymarketPopulationError, ValueError) as exc:
+            print(f"collect-polymarket-population: {exc}", file=sys.stderr)
+            return 2
     elif args.command == "collect-evidence-once":
         payload = collect_evidence_once(
             config_path=args.config,

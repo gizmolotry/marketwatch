@@ -145,6 +145,100 @@ def test_polymarket_wallet_query_sends_server_time_bounds_and_records_exact_filt
     assert batch.complete is True
 
 
+def test_polymarket_trade_side_filter_fails_closed_on_source_mismatch(tmp_path):
+    trade = {
+        "proxyWallet": "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+        "side": "SELL",
+        "asset": "asset-yes",
+        "conditionId": "condition-1",
+        "size": 1,
+        "price": 0.5,
+        "timestamp": 1767225600,
+        "outcomeIndex": 0,
+        "transactionHash": "0xabc",
+    }
+    transport = StubTransport([(200, json.dumps([trade]), {})])
+    connector = PolymarketConnector(
+        client(tmp_path, transport),
+        clock=lambda: datetime(2026, 1, 2, 0, 0, 1, tzinfo=UTC),
+    )
+
+    with pytest.raises(ValueError, match="outside the exact side filter"):
+        connector.fetch_trades(side="BUY", page_size=2)
+
+    assert PolymarketConnector.trade_query_filters(side="BUY") == {"side": "BUY"}
+    assert PolymarketConnector.trade_query_filters(side="SELL") == {"side": "SELL"}
+    assert transport.calls[0][2] == {
+        "limit": 2,
+        "offset": 0,
+        "end": 1767312000,
+        "side": "BUY",
+    }
+
+
+def test_polymarket_trade_side_filter_preserves_a_matching_source_side(tmp_path):
+    trade = {
+        "proxyWallet": "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+        "side": "BUY",
+        "asset": "asset-yes",
+        "conditionId": "condition-1",
+        "size": 1,
+        "price": 0.5,
+        "timestamp": 1767225600,
+        "outcomeIndex": 0,
+        "transactionHash": "0xabc",
+    }
+    connector = PolymarketConnector(
+        client(tmp_path, StubTransport([(200, json.dumps([trade]), {})])),
+        clock=lambda: datetime(2026, 1, 2, 0, 0, 1, tzinfo=UTC),
+    )
+    batch = connector.fetch_trades(side="BUY", page_size=2)
+    assert batch.fills[0].side is TradeSide.BUY
+
+
+@pytest.mark.parametrize("side", ["", "buy", "sell", " Buy", "BUY ", TradeSide.BUY, 1])
+def test_polymarket_trade_side_filter_rejects_invalid_or_ambiguous_values_before_network(tmp_path, side):
+    transport = StubTransport([])
+    connector = PolymarketConnector(client(tmp_path, transport))
+
+    with pytest.raises(ValueError, match="exactly BUY or SELL"):
+        connector.fetch_trades(side=side)
+
+    assert transport.calls == []
+
+
+def test_polymarket_trade_side_filter_binds_continuation_to_exact_query(tmp_path):
+    trade = {
+        "proxyWallet": "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+        "side": "BUY",
+        "asset": "asset-yes",
+        "conditionId": "condition-1",
+        "size": 1,
+        "price": 0.5,
+        "timestamp": 1767225600,
+        "outcomeIndex": 0,
+        "transactionHash": "0xabc",
+    }
+    transport = StubTransport([(200, json.dumps([trade]), {})])
+    connector = PolymarketConnector(
+        client(tmp_path, transport),
+        clock=lambda: datetime(2026, 1, 2, 0, 0, 1, tzinfo=UTC),
+    )
+    first = connector.fetch_trades(side="BUY", page_size=1, max_pages=1)
+
+    cursor = json.loads(first.continuation)
+    assert cursor["filters"] == {"end": 1767312000, "side": "BUY"}
+    with pytest.raises(ValueError, match="does not match"):
+        connector.fetch_trades(
+            side="SELL",
+            page_size=1,
+            max_pages=1,
+            continuation=first.continuation,
+        )
+
+    assert len(transport.calls) == 1
+
+
 def test_polymarket_continuation_is_bound_to_exact_wallet_window(tmp_path):
     trade = {
         "proxyWallet": "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
@@ -231,6 +325,45 @@ def test_polymarket_wallet_query_rejects_invalid_scope_before_network(tmp_path):
         )
 
     assert transport.calls == []
+
+
+def test_polymarket_trade_rows_fail_closed_when_non_object_or_outside_exact_filters(tmp_path):
+    base = {
+        "proxyWallet": "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+        "side": "BUY",
+        "asset": "asset-yes",
+        "conditionId": "condition-1",
+        "size": 1,
+        "price": 0.5,
+        "timestamp": 1767225600,
+        "outcomeIndex": 0,
+        "transactionHash": "0xabc",
+    }
+    cases = [
+        ([base, "not-an-object"], {}, "rows must all be objects"),
+        ([{**base, "conditionId": "condition-other"}], {}, "market filter"),
+        ([{**base, "timestamp": 1767225599}], {}, "start filter"),
+        ([{**base, "timestamp": 1767225602}], {}, "end filter"),
+        ([{**base, "side": "SELL"}], {"side": "BUY"}, "side filter"),
+        (
+            [{**base, "proxyWallet": "0x1111111111111111111111111111111111111111"}],
+            {"user": "0x56687bf447db6ffa42ffe2204a05edaa20f55839"},
+            "user filter",
+        ),
+    ]
+    for index, (rows, additions, message) in enumerate(cases):
+        transport = StubTransport([(200, json.dumps(rows), {})])
+        connector = PolymarketConnector(client(tmp_path / str(index), transport))
+        kwargs = {
+            "market": "condition-1",
+            "start": datetime(2026, 1, 1, tzinfo=UTC),
+            "end": datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC),
+            **additions,
+        }
+        # User and market are a documented valid combined scope.
+        with pytest.raises(ValueError, match=message):
+            connector.fetch_trades(**kwargs)
+        assert len(transport.calls) == 1
 
 
 def test_polymarket_combined_user_scope_never_synthesizes_full_history_start():
@@ -445,6 +578,8 @@ def test_http_retries_capture_every_response_before_parsing(tmp_path):
     )
 
     assert parsed.payload == {"ok": True}
+    assert len(parsed.attempt_captures) == 2
+    assert parsed.attempt_captures[-1] == parsed.raw
     assert len(list((tmp_path / "raw" / "receipts").rglob("*.json"))) == 2
 
 
@@ -484,3 +619,35 @@ def test_http_receipts_allowlist_response_headers_and_drop_credentials(tmp_path)
     serialized = receipt_path.read_text(encoding="utf-8").lower()
     for secret in ("session=secret", "request-secret", "bearer secret", "basic secret", "api-secret", "token-secret"):
         assert secret not in serialized
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("proxyWallet", "not-a-wallet", "proxyWallet must be"),
+        ("proxyWallet", "0x" + "1" * 39, "proxyWallet must be"),
+        ("side", "buy", "source side must be exactly"),
+        ("side", "Buy", "source side must be exactly"),
+    ],
+)
+def test_polymarket_trade_source_wallet_and_side_are_exact(
+    tmp_path, field, value, message
+):
+    trade = {
+        "proxyWallet": "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+        "side": "BUY",
+        "asset": "asset-yes",
+        "conditionId": "condition-1",
+        "size": "12.34",
+        "price": "0.56",
+        "timestamp": 1767225600,
+        "outcomeIndex": 0,
+        "transactionHash": "0xabc",
+    }
+    trade[field] = value
+    connector = PolymarketConnector(
+        client(tmp_path, StubTransport([(200, json.dumps([trade]), {})]))
+    )
+
+    with pytest.raises(ValueError, match=message):
+        connector.fetch_trades(max_pages=1)
