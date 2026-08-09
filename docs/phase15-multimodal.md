@@ -35,6 +35,20 @@ Each fact has an `event_time`, `ingested_at`, raw artifact hash/UID, source URL 
 
 Market context is a separate raw-lineaged contract: question, category, outcomes, documented siblings, scheduled-event controls, and resolution schedule. A scheduled future event is allowed as context only if the control was already observed and ingested before the decision cutoff. It does not label a movement, assign suspicion, or make an activity diagnostic scorable by itself.
 
+### Implemented bounded Polymarket actor population collection
+
+The repository now implements a bounded Polymarket trade-population collector for one exact condition ID and one frozen, inclusive whole-second interval. It always requests `takerOnly=false`, recursively splits saturated pages into disjoint time windows, and uses separately recorded `BUY`/`SELL` one-second fallback requests only when necessary. A saturated or unsupported side partition is explicitly `irreducibly_partial`; logical-request, total-HTTP-attempt, or leaf-budget exhaustion is explicitly `budget_exhausted`. Neither is silently repaired into population coverage.
+
+The request is evidence-bound before it is sent. The CLI accepts a canonical `--source-bound` envelope containing raw objects and receipts for both (1) an official Polymarket `/trades` contract snapshot and (2) exact Gamma market metadata, plus a separate canonical `--approved-contract-sha256-file` policy. The official snapshot must be in that operator-approved SHA-256 policy. Gamma `acceptingOrdersTimestamp` derives only the condition-specific market-activity lower bound; it is not a retention clock. Every fetched leaf binds every response-bearing retry attempt's exact request, status, raw delivery, and receipt. The final successful raw rows are re-run through the production parser and must exactly equal the connector's ordered fills. Malformed source wallets or non-exact source sides fail closed, while parent/child reconciliation exposes source inconsistency rather than hiding it.
+
+The unknown/approximate Data API market-query retention floor means every manifest has `complete=false`. A run whose terminal queries are all exhausted and source-consistent reports `query_exhausted_coverage_limited`; all other runs report `partial`. Persisted `CoverageLedger` rows carry observed retrieval time, filters, continuation, and raw hashes but are always incomplete. An unfetched `budget_exhausted` interval has no delivery or receipt and is returned as an explicit unrecorded interval rather than fabricated as a ledger row. This is a Polymarket-specific public-wallet actor capability. `proxyWallet` remains a pseudonymous venue field, not a person, account owner, maker/taker identity, beneficial owner, or common-control inference. Kalshi collection remains valuable for market-level controls but has no public wallet/account actor field.
+
+### Implemented offline observational corpus freezer
+
+`marketleak.multimodal.datasets.freeze_observational_trade_fills` deterministically freezes already-collected canonical `TradeFill` files from explicit local roots. It performs no network I/O and binds the selected file set, canonical records, raw objects, matching receipts, exact coverage-ledger rows, selection policy, source/parser/schema versions, and freezer code hash. A re-freeze must reproduce byte-for-byte. Missing/corrupt raw lineage, missing matching receipts, conflicting fill UIDs, or noncanonical records fail closed; clean hashes do not convert partial coverage into complete coverage.
+
+The local 630,277-fill exploratory corpus is not committed as repository data. Its 238 of 238 relevant coverage records are incomplete, so the freezer must report a `ready_with_limitations` observational artifact rather than a complete corpus. It contains no labels, is not an effectiveness dataset, and cannot establish a negative/activity-absence claim, a fraud label, or predictive effectiveness. It is only a real public-fill substrate for later governed corpus construction.
+
 ## 2. Labels and human adjudication
 
 Phase 15 uses a multi-axis human ontology instead of a binary fraud label:
@@ -137,7 +151,7 @@ Treat `not_ready`, missing calibration, or any abstention reason as an outcome t
 
 ## 9. Operator sequence
 
-1. Configure only documented official/public sources and retain raw artifacts before parsing.
+1. Configure only documented official/public sources and retain raw artifacts before parsing. For public-wallet population work, use a frozen, single-condition Polymarket interval and preserve its coverage manifest; do not call a market/event query all-history.
 2. Maintain a persistent public-evidence archive before using public-explanation coverage claims.
 3. Capture market context and documented reference mappings; do not use a generic price feed as a settlement source.
 4. Build the as-of event snapshot and continuous market features with explicit missingness.

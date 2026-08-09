@@ -144,6 +144,55 @@ Feature: Point-in-time multimodal market-integrity assessment
 
   Rule: Wallet and on-chain evidence remains factual and pseudonymous
 
+    @implemented @polymarket @population @wallet @coverage
+    Scenario: Preserve the bounded public-wallet population coverage contract
+      Given one exact Polymarket condition ID and a frozen inclusive whole-second interval
+      And a separately approved official-trades-contract SHA-256 policy admits a captured official contract snapshot
+      And raw objects and receipts bind that contract snapshot and the exact Gamma market metadata
+      And Gamma "acceptingOrdersTimestamp" supplies a market-activity lower bound rather than a retention floor
+      And the exact Data API market-query retention floor remains unknown or approximate
+      And the collector requests both roles with "takerOnly" set to false
+      When a saturated page requires recursive coverage collection
+      Then time windows are disjoint and every terminal leaf retains raw-delivery lineage
+      And a one-second saturation may use separately recorded "BUY" and "SELL" requests
+      And an unsupported or saturated side leaf yields "irreducibly_partial"
+      And logical-request, total-HTTP-attempt, or leaf budget exhaustion yields an explicit "budget_exhausted" leaf
+      And every fetched leaf binds all response-bearing attempts with exact requests, statuses, raw deliveries, and receipts
+      And successful raw rows exactly equal ordered production-parser fills
+      And malformed source wallets or non-exact source sides fail closed
+      And every manifest remains incomplete because the exact Data API retention floor is unknown
+      And exhausted, consistent terminal queries report "query_exhausted_coverage_limited", otherwise "partial"
+      And an unfetched budget interval remains explicitly unrecorded instead of becoming a CoverageLedger record
+      And the result identifies only the exposed pseudonymous "proxyWallet"
+      And it does not infer a person, wallet owner, or common control
+      # Executable mapping: tests/v2/test_polymarket_population.py::test_recursive_boundaries_receipts_and_parent_reconciliation
+      # Executable mapping: tests/v2/test_polymarket_population.py::test_one_second_buy_sell_partition_and_source_inconsistency
+      # Executable mapping: tests/v2/test_polymarket_population.py::test_no_side_capability_records_irreducibly_partial
+      # Executable mapping: tests/v2/test_polymarket_population.py::test_market_activity_lower_bound_is_derived_from_gamma_and_distinct_clocks
+      # Executable mapping: tests/v2/test_polymarket_population.py::test_retry_attempts_are_all_bound_and_total_http_budget_is_hard
+      # Executable mapping: tests/v2/test_ingestion_connectors.py::test_polymarket_trade_source_wallet_and_side_are_exact
+      # Executable mapping: tests/v2/test_polymarket_population.py::test_contract_policy_tamper_non_2xx_and_unapproved_hash_fail
+      # Executable mapping: tests/v2/test_polymarket_population.py::test_request_budget_preserves_first_partial_page
+      # Executable mapping: tests/v2/test_polymarket_population.py::test_leaf_budget_stops_recursive_growth
+      # Executable mapping: tests/v2/test_cli_v2.py::test_population_cli_serializes_one_exact_frozen_condition_query
+      # Executable mapping: tests/v2/test_cli_v2.py::test_population_collection_persists_canonical_manifest_idempotently
+      # Executable mapping: tests/v2/test_cli_v2.py::test_population_manifest_atomic_publication_failure_leaves_no_target_or_pending_file
+      # Executable mapping: tests/v2/test_cli_v2.py::test_population_coverage_uses_terminal_leaf_filters_and_never_completes_an_inconsistent_run
+      # Executable mapping: tests/v2/test_cli_v2.py::test_population_cli_max_request_budget_reports_unrecorded_terminal_interval_without_ledger_row
+
+    @implemented @dataset @freeze @observational_only
+    Scenario: Freeze real canonical fills without turning partial coverage into a label set
+      Given an explicit local selection of canonical TradeFill records, raw objects, matching receipts, and coverage rows
+      When the offline observational corpus freezer hashes and verifies that selection
+      Then the manifest binds selected records, raw lineage, coverage ledger, selection policy, and freezer code
+      And it performs no network I/O
+      And missing lineage, receipt, canonical encoding, or a conflicting fill UID fails closed
+      And incomplete coverage remains a limitation and cannot support an absence claim
+      And the artifact contains no fraud labels or effectiveness claim
+      # Executable mapping: tests/phase15/test_dataset_freezer.py::test_hashing_clean_files_does_not_promote_incomplete_coverage
+      # Executable mapping: tests/phase15/test_dataset_freezer.py::test_freezer_performs_no_network_io
+      # Executable mapping: tests/phase15/test_dataset_freezer.py::test_manifest_roundtrip_self_verification_and_immutable_write
+
     @target_design @not_current @wallet @behavior
     Scenario: Derive public wallet behavior without inferring a human identity
       Given public market activity is mapped to stable proxy wallet "wallet-17"

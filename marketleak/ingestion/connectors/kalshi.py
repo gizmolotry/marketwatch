@@ -208,6 +208,8 @@ class KalshiConnector:
                 self._raw_artifact(parsed.raw, self.TRADE_SOURCE_UID),
                 next_cursor or None,
                 complete,
+                parsed.raw,
+                parsed.attempt_captures,
             )
             if complete:
                 return
@@ -225,7 +227,14 @@ class KalshiConnector:
                     batch.observations.append(record)
             quality.received += len(batch.observations) - quality.received
             quality.normalized = len(batch.observations)
-            batch.raw_artifacts.append(page.raw_artifact)
+            if page.raw_capture is not None:
+                batch.raw_artifacts.extend(
+                    self._raw_artifact(capture, self.TRADE_SOURCE_UID)
+                    for capture in page.raw_attempt_captures
+                )
+                batch.raw_captures.extend(page.raw_attempt_captures)
+            else:
+                batch.raw_artifacts.append(page.raw_artifact)
             batch.continuation = page.continuation
             batch.complete = page.complete
         return batch
@@ -299,7 +308,11 @@ class KalshiConnector:
         snapshots = list(self.normalize_orderbook(normalized_ticker, parsed.payload, parsed.raw))
         return IngestionBatch(
             snapshots=snapshots,
-            raw_artifacts=[self._raw_artifact(parsed.raw, self.BOOK_SOURCE_UID)],
+            raw_artifacts=[
+                self._raw_artifact(capture, self.BOOK_SOURCE_UID)
+                for capture in parsed.attempt_captures
+            ],
+            raw_captures=list(parsed.attempt_captures),
             capabilities=[self.orderbook_capability],
             quality=DataQualityReport(
                 source="kalshi:market/orderbook", received=1, normalized=2

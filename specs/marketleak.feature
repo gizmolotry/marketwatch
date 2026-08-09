@@ -21,6 +21,40 @@ Feature: Prediction-market information leakage triage
     Then the system should flag low liquidity as an alternative explanation
     And reduce confidence in the integrity signal
 
+  @implemented @polymarket @population @public_wallet
+  Scenario: Collect one evidence-bound Polymarket public-wallet population without silently dropping role coverage
+    Given one exact Polymarket condition ID and a frozen inclusive whole-second interval
+    And an operator-approved SHA-256 policy admits the captured official trades-contract snapshot
+    And raw objects and receipts exist for that official snapshot and the exact Gamma market metadata
+    And Gamma "acceptingOrdersTimestamp" supplies only the condition-specific market-activity lower bound
+    And the Data API market-query retention floor remains unknown or approximate
+    When the population collector requests public trades
+    Then every source query fixes that one condition ID and sends "takerOnly" as false
+    And saturated pages are recursively partitioned into disjoint time windows
+    And a saturated one-second window is partitioned by explicit "BUY" and "SELL" requests when supported
+    And unsupported or still-saturated side partitions are explicit "irreducibly_partial" leaves
+    And logical-request, total-HTTP-attempt, and leaf limits yield explicit "budget_exhausted" leaves rather than hidden gaps
+    And each fetched leaf binds every response-bearing attempt's exact request, status, raw delivery, and receipt
+    And successful raw rows exactly equal ordered production-parser fills
+    And malformed source wallets or non-exact source sides fail closed
+    And the immutable manifest is always incomplete because the exact Data API retention floor is unknown
+    And it reports "query_exhausted_coverage_limited" only when every terminal query is exhausted and source-consistent, otherwise "partial"
+    And an unfetched budget leaf is reported as unrecorded and is not forged into a CoverageLedger row
+    And the result refers to an exposed "proxyWallet" only as a pseudonymous venue actor
+    # Executable mapping: tests/v2/test_polymarket_population.py::test_recursive_boundaries_receipts_and_parent_reconciliation
+    # Executable mapping: tests/v2/test_polymarket_population.py::test_one_second_buy_sell_partition_and_source_inconsistency
+    # Executable mapping: tests/v2/test_polymarket_population.py::test_market_activity_lower_bound_is_derived_from_gamma_and_distinct_clocks
+    # Executable mapping: tests/v2/test_polymarket_population.py::test_retry_attempts_are_all_bound_and_total_http_budget_is_hard
+    # Executable mapping: tests/v2/test_ingestion_connectors.py::test_polymarket_trade_source_wallet_and_side_are_exact
+    # Executable mapping: tests/v2/test_polymarket_population.py::test_contract_policy_tamper_non_2xx_and_unapproved_hash_fail
+    # Executable mapping: tests/v2/test_polymarket_population.py::test_request_budget_preserves_first_partial_page
+    # Executable mapping: tests/v2/test_polymarket_population.py::test_leaf_budget_stops_recursive_growth
+    # Executable mapping: tests/v2/test_cli_v2.py::test_population_cli_serializes_one_exact_frozen_condition_query
+    # Executable mapping: tests/v2/test_cli_v2.py::test_population_collection_persists_canonical_manifest_idempotently
+    # Executable mapping: tests/v2/test_cli_v2.py::test_population_manifest_atomic_publication_failure_leaves_no_target_or_pending_file
+    # Executable mapping: tests/v2/test_cli_v2.py::test_population_coverage_uses_terminal_leaf_filters_and_never_completes_an_inconsistent_run
+    # Executable mapping: tests/v2/test_cli_v2.py::test_population_cli_max_request_budget_reports_unrecorded_terminal_interval_without_ledger_row
+
   Scenario: Graph and proxy-cluster caches are non-executable
     Given a bounded canonical JSON graph or proxy-cluster cache
     When a runtime surface loads the cache

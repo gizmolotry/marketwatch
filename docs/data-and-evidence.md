@@ -16,7 +16,7 @@ The same rule applies to HTTP market collection, public-document collection, and
 
 | Source | Available market data | Actor/account visibility | Important limit |
 |---|---|---|---|
-| Polymarket Data API | Public fills with explicit side when sent | Public `proxyWallet` only | Maker/taker identity is not inferred. |
+| Polymarket Data API | Public fills with explicit BUY/SELL side, price, size, condition ID, and transaction hash when sent | Public `proxyWallet` only | The wallet is a venue-exposed pseudonymous actor, not a person, owner, maker/taker identity, or control claim. |
 | Polymarket CLOB | Current token-level order-book snapshot | Unavailable | Polling begins local history; it cannot recreate past L2. |
 | Kalshi REST trades | Public trades and price observations | Unavailable | Direction is retained only if explicitly exposed. |
 | Kalshi REST book | Current YES/NO bid depth | Unavailable | It is aggregate depth, not owned orders. |
@@ -42,6 +42,23 @@ Kalshi requires an authenticated WebSocket handshake even for public market-data
 Never send those values to a browser, include them in client-side environment variables, or write them into raw receipts. The collector deliberately records only non-secret transport metadata and raw incoming messages. Public trade messages do not expose accounts or order owners. `taker_outcome_side`, legacy `taker_side`, and `taker_book_side` are retained exactly when present; absent direction is not invented. Aggregate `orderbook_delta` is an authenticated L2 data channel, not account data.
 
 The collector has bounded reconnect attempts and reports incomplete collection rather than silently claiming continuous coverage. It is transport-injected and does not open a live connection merely by import or construction.
+
+## Polymarket public-wallet population intake
+
+Polymarket is the current venue with a viable public, pseudonymous actor domain: each public trade record can expose a `proxyWallet`. Kalshi remains useful for market mechanics, price, and aggregate-book controls, but its documented public trade and book surfaces do **not** expose an account or wallet actor. The two venues therefore must not be treated as equivalent sources of wallet behavior.
+
+`python -m marketleak.cli_v2 collect-polymarket-population` is an implemented, bounded backfill for the public trade population of **one exact `conditionId`**. It requires an inclusive frozen whole-second `start` and `end`, always sends `takerOnly=false`, and does not offer a broader event, multi-condition, continuation, or taker-only option. The Data API documents an offset limit of 10,000 and directs clients needing deeper history to use `start`/`end` windows; it also documents `takerOnly` as defaulting to true, the `BUY`/`SELL` side filter, and only an approximate market/event historical horizon. Its exact retained cutoff is unknown. A positive `start` can extend only a user-scoped query, not establish market/event retention. See the official [trades endpoint](https://docs.polymarket.com/api-reference/core/get-trades-for-a-user-or-markets).
+
+Before the command can run, the operator supplies two canonical JSON inputs that are deliberately separate from query arguments:
+
+- `--source-bound` identifies a raw/receipt-bound capture of the official Polymarket `/trades` contract **and** a raw/receipt-bound capture of the exact Gamma market metadata. The metadata must bind the requested condition ID and Gamma market ID. Its `acceptingOrdersTimestamp` supplies only a market-activity lower bound; it is never represented as a Data API retention floor. The request starts no earlier than that activity bound and ends no later than the later of the two captured observations.
+- `--approved-contract-sha256-file` is a separately governed canonical allowlist of operator-approved official-contract snapshot SHA-256 values. A captured document is evidence-bound but is not automatically an approved policy input. Tampered raw objects, receipts, metadata identity, non-2xx contract receipts, or an unapproved snapshot fail closed.
+
+The collector records the entire query tree. Every fetched leaf binds the exact source request and every response-bearing retry attempt's status, raw delivery, and authenticated receipt. The successful raw page is re-normalized by the production parser and must exactly equal the ordered returned fills; invalid `proxyWallet` values and non-exact source `BUY`/`SELL` values fail closed. When paging saturates, the collector recursively partitions a window into disjoint inclusive second ranges. If a one-second range still saturates, it performs separately auditable `BUY` and `SELL` requests. An unsupported or still-saturated side partition is an **`irreducibly_partial`** terminal leaf. `max_requests` bounds logical calls, `max_http_attempts` bounds all response attempts including retries, and `max_leaves` bounds the query tree. An exhausted bound is an explicit **`budget_exhausted`** leaf, not a hidden gap.
+
+Every population manifest has `complete=false`, because the Data API market-query retention floor is unknown/approximate. It reports `query_exhausted_coverage_limited` only if every terminal query is exhausted and the parent/child source reconciliation is consistent; it reports `partial` for budget exhaustion, irreducible leaves, or source inconsistency. A fetched terminal leaf can append a `CoverageLedger` row only with its actual retrieval time, exact filters, continuation, and raw hashes; all such rows remain incomplete. An unfetched budget leaf has none of those observations, so it is returned as an explicit unrecorded interval and is never forged into the ledger.
+
+This obtains evidence about publicly exposed venue actors only. It neither discovers all Polymarket activity beyond the selected condition/time range nor identifies the human behind a `proxyWallet`. A Polygon address, transaction hash, funding proximity, or a Bitcoin address is not a substitute for the exact canonical-fill join required for on-chain corroboration, and none establishes wallet ownership or common control.
 
 ## Point-in-time public evidence
 
@@ -71,6 +88,8 @@ If no documented source exists, the result is `missing_documented_settlement_sou
 ## On-chain corroboration boundary
 
 For Polymarket settlement corroboration, accept only raw-verified Polygon (chain ID 137) `OrderFilled` facts that exactly join an existing canonical fill and retain raw provenance. `TransferSingle` logs do not supply an execution price and must not be converted into a price/fill using a placeholder. Chain paths and sums are computed by code, not inferred by a language model.
+
+The population collector's venue `proxyWallet` is useful only as the public pseudonymous actor field carried by that canonical fill. Polygon activity is corroboration only after the exact join; it is not a second, interchangeable actor-attribution source and cannot repair absent public-wallet visibility.
 
 Bitcoin data is contextual-only in this system. It is not an attribution source, settlement proof, price source, or a way to connect a wallet to a market participant. Generic Bitcoin claims, addresses, and graph heuristics cannot enter the Polygon `OrderFilled` corroboration path.
 

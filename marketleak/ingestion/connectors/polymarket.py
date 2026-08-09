@@ -41,6 +41,21 @@ class PolymarketConnector:
     MAX_TRADE_LIMIT = 10_000
     MAX_TRADE_OFFSET = 10_000
     _WALLET_PATTERN = re.compile(r"^0x[a-fA-F0-9]{40}$")
+    _PUBLIC_TRADE_PARAMETERS = frozenset(
+        {
+            "limit",
+            "offset",
+            "takerOnly",
+            "market",
+            "eventId",
+            "user",
+            "side",
+            "start",
+            "end",
+            "filterType",
+            "filterAmount",
+        }
+    )
 
     trade_capability = CapabilityMetadata(
         platform="polymarket",
@@ -113,6 +128,7 @@ class PolymarketConnector:
         market: str | None = None,
         event_id: int | None = None,
         user: str | None = None,
+        side: str | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
         taker_only: bool | None = None,
@@ -130,6 +146,12 @@ class PolymarketConnector:
             raise ValueError("event_id must be a positive integer")
         if taker_only is not None and not isinstance(taker_only, bool):
             raise ValueError("taker_only must be a boolean")
+        # The Data API's query enum is uppercase.  Do not normalize a caller's
+        # value here: a lower-case value, an empty value, or a domain enum is
+        # ambiguous at this external boundary and must not silently change the
+        # exact query/provenance record.
+        if side is not None and (type(side) is not str or side not in {"BUY", "SELL"}):
+            raise ValueError("side must be exactly BUY or SELL")
         normalized_user = cls._normalize_wallet(user)
         normalized_start = utc_datetime(start, "start") if start is not None else None
         normalized_end = utc_datetime(end, "end") if end is not None else None
@@ -149,6 +171,8 @@ class PolymarketConnector:
             filters["eventId"] = event_id
         if normalized_user is not None:
             filters["user"] = normalized_user
+        if side is not None:
+            filters["side"] = side
         if normalized_start is not None:
             filters["start"] = int(normalized_start.timestamp())
         elif normalized_user is not None and market is None and event_id is None:
@@ -188,6 +212,7 @@ class PolymarketConnector:
         market: str | None = None,
         event_id: int | None = None,
         user: str | None = None,
+        side: str | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
         taker_only: bool | None = None,
@@ -217,6 +242,7 @@ class PolymarketConnector:
             market=market,
             event_id=event_id,
             user=user,
+            side=side,
             start=start,
             end=resolved_end,
             taker_only=taker_only,
@@ -282,10 +308,18 @@ class PolymarketConnector:
     def normalize_trade(cls, item: Mapping[str, Any], capture: RawCapture) -> TradeFill:
         condition_id = require_text(item.get("conditionId"), "conditionId")
         asset = require_text(item.get("asset"), "asset")
-        wallet = require_text(item.get("proxyWallet"), "proxyWallet").lower()
-        side_text = require_text(item.get("side"), "side").upper()
+        source_wallet = require_text(item.get("proxyWallet"), "proxyWallet")
+        if not cls._WALLET_PATTERN.fullmatch(source_wallet):
+            raise ValueError(
+                "proxyWallet must be a 0x-prefixed 40-hex-character wallet address"
+            )
+        wallet = source_wallet.lower()
+        # Do not repair casing at the source boundary: the documented source
+        # enum is exactly uppercase BUY/SELL and provenance must retain that
+        # contract instead of accepting an ambiguous variant.
+        side_text = require_text(item.get("side"), "side")
         if side_text not in {"BUY", "SELL"}:
-            raise ValueError("side must be explicitly BUY or SELL")
+            raise ValueError("source side must be exactly BUY or SELL")
         event_time = utc_datetime(item.get("timestamp"), "timestamp")
         price = decimal_from(item.get("price"), "price", minimum=Decimal(0), maximum=Decimal(1))
         size = decimal_from(item.get("size"), "size", minimum=Decimal(0))
@@ -333,12 +367,14 @@ class PolymarketConnector:
         market: str | None = None,
         event_id: int | None = None,
         user: str | None = None,
+        side: str | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
         taker_only: bool | None = None,
         page_size: int = 1000,
         max_pages: int = 11,
         continuation: str | None = None,
+        http_attempt_limit: int | None = None,
     ) -> Iterator[ConnectorPage[TradeFill]]:
         if page_size < 1 or page_size > self.MAX_TRADE_LIMIT:
             raise ValueError("page_size must be in [1, 10000]")
@@ -348,6 +384,7 @@ class PolymarketConnector:
             market=market,
             event_id=event_id,
             user=user,
+            side=side,
             start=start,
             end=end,
             taker_only=taker_only,
@@ -359,6 +396,7 @@ class PolymarketConnector:
             else None
         )
         normalized_end = datetime.fromtimestamp(filters["end"], tz=UTC)
+        normalized_user = filters.get("user")
         offset = self._decode_trade_continuation(continuation, filters=filters)
         for _ in range(max_pages):
             params: dict[str, Any] = {"limit": page_size, "offset": offset, **filters}
@@ -367,18 +405,30 @@ class PolymarketConnector:
                 source="data-api/trades",
                 url=f"{self.DATA_API}/trades",
                 params=params,
+                public_parameter_allowlist=self._PUBLIC_TRADE_PARAMETERS,
+                max_attempts=http_attempt_limit,
             )
             if not isinstance(parsed.payload, list):
                 raise ValueError("Polymarket /trades response must be a list")
             records: list[TradeFill] = []
             for item in parsed.payload:
                 if not isinstance(item, Mapping):
-                    continue
+                    raise ValueError("Polymarket /trades response rows must all be objects")
                 record = self.normalize_trade(item, parsed.raw)
                 if normalized_start and record.event_time < normalized_start:
-                    continue
+                    raise ValueError("Polymarket /trades returned a row before the exact start filter")
                 if normalized_end and record.event_time > normalized_end:
-                    continue
+                    raise ValueError("Polymarket /trades returned a row after the exact end filter")
+                if market is not None and record.market_uid != qualified_id(
+                    "polymarket", f"market/{market}"
+                ):
+                    raise ValueError("Polymarket /trades returned a row outside the exact market filter")
+                if normalized_user is not None and record.actor_uid != qualified_id(
+                    "polymarket", f"wallet/{normalized_user}"
+                ):
+                    raise ValueError("Polymarket /trades returned a row outside the exact user filter")
+                if side is not None and record.side is not TradeSide(side.lower()):
+                    raise ValueError("Polymarket /trades returned a row outside the exact side filter")
                 records.append(record)
             next_offset = offset + len(parsed.payload)
             exhausted = len(parsed.payload) < page_size
@@ -396,6 +446,8 @@ class PolymarketConnector:
                 self._raw_artifact(parsed.raw, self.TRADE_SOURCE_UID),
                 next_continuation,
                 complete,
+                parsed.raw,
+                parsed.attempt_captures,
             )
             if complete or api_ceiling:
                 return
@@ -409,6 +461,15 @@ class PolymarketConnector:
             quality.normalized += len(page.records)
             batch.fills.extend(page.records)
             batch.raw_artifacts.append(page.raw_artifact)
+            if page.raw_capture is not None:
+                # The final artifact is already present above.  Preceding
+                # retry attempts are response evidence too, even though they
+                # did not produce normalized records.
+                batch.raw_artifacts[-1:] = [
+                    self._raw_artifact(capture, self.TRADE_SOURCE_UID)
+                    for capture in page.raw_attempt_captures
+                ]
+                batch.raw_captures.extend(page.raw_attempt_captures)
             batch.continuation = page.continuation
             batch.complete = page.complete
         return batch
@@ -460,7 +521,11 @@ class PolymarketConnector:
         snapshot = self.normalize_orderbook(parsed.payload, parsed.raw)
         return IngestionBatch(
             snapshots=[snapshot],
-            raw_artifacts=[self._raw_artifact(parsed.raw, self.BOOK_SOURCE_UID)],
+            raw_artifacts=[
+                self._raw_artifact(capture, self.BOOK_SOURCE_UID)
+                for capture in parsed.attempt_captures
+            ],
+            raw_captures=list(parsed.attempt_captures),
             capabilities=[self.orderbook_capability],
             quality=DataQualityReport(
                 source="polymarket:clob/book", received=1, normalized=1
